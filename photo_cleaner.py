@@ -12,13 +12,23 @@ import argparse
 import base64
 import json
 import os
+import socket
 import subprocess
 import sys
 import tempfile
+import threading
+import time
+import webbrowser
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 from dotenv import load_dotenv
+
+try:
+    from flask import Flask, jsonify, render_template_string
+    FLASK_AVAILABLE = True
+except ImportError:
+    FLASK_AVAILABLE = False
 
 # Load secrets from shared Keys folder (supports JSON or .env syntax)
 ENV_PATH = "/Users/mike/Documents/Keys/.env"
@@ -46,6 +56,120 @@ def load_env_file(path: str) -> None:
         print(f"⚠️  Could not load env file {path}: {e}")
 
 load_env_file(ENV_PATH)
+
+scan_state = {
+    "current_photo": None,
+    "stats": {"scanned": 0, "matched": 0, "deleted": 0, "cost": 0.0},
+    "history": [],
+    "is_running": False,
+    "stop_requested": False,
+    "status": "Idle",
+    "meta": {},
+}
+
+PRICE_PER_MILLION = {
+    "gpt-5.1": 1.25,
+    "gpt-5-mini": 0.25,
+    "gpt-5-nano": 0.05,
+    "gpt-4o": 2.50,
+    "gpt-4o-mini": 0.15,
+}
+TOKENS_PER_IMAGE = 270
+
+# Minimal dashboard template
+HTML_TEMPLATE = """
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Apple Photos Cleaner</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin: 0; padding: 16px; background: #f6f7fb; color: #111; }
+    header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+    .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 16px; box-shadow: 0 6px 20px rgba(0,0,0,0.06); }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px,1fr)); gap: 12px; }
+    img { max-width: 100%; max-height: 70vh; object-fit: contain; border-radius: 8px; background: #f8fafc; }
+    .log { height: 200px; overflow-y: auto; background: #0f172a; color: #e2e8f0; padding: 8px; border-radius: 8px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 13px; }
+    .badge { display: inline-block; padding: 4px 8px; border-radius: 12px; background: #e0f2fe; color: #0ea5e9; font-weight: 600; font-size: 12px; }
+    .btn { padding: 8px 12px; border-radius: 8px; border: 1px solid #e5e7eb; background: #fff; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <div style="font-size:22px;font-weight:700;">🧹 Apple Photos Cleaner</div>
+      <div id="meta" style="color:#475569;font-size:13px;"></div>
+    </div>
+    <div><span id="status" class="badge">Idle</span></div>
+  </header>
+
+  <div class="grid" style="margin-bottom:12px;">
+    <div class="card"><div style="color:#475569;font-size:13px;">Scanned</div><div id="scanned" style="font-size:28px;font-weight:700;">0</div></div>
+    <div class="card"><div style="color:#475569;font-size:13px;">Matched</div><div id="matched" style="font-size:28px;font-weight:700;color:#f97316;">0</div></div>
+    <div class="card"><div style="color:#475569;font-size:13px;">Deleted</div><div id="deleted" style="font-size:28px;font-weight:700;color:#ef4444;">0</div></div>
+    <div class="card"><div style="color:#475569;font-size:13px;">Cost (est)</div><div id="cost" style="font-size:28px;font-weight:700;color:#10b981;">$0.00</div></div>
+  </div>
+
+  <div class="card" style="margin-bottom:12px;">
+    <div style="font-weight:700;margin-bottom:8px;">Current Photo</div>
+    <div id="photo-name" style="color:#475569;font-size:14px;margin-bottom:6px;">Waiting...</div>
+    <img id="photo-img" src="" alt="" />
+    <div id="reason" style="margin-top:8px;font-size:14px;"></div>
+    <div id="confidence" style="color:#475569;font-size:13px;"></div>
+  </div>
+
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+      <div style="font-weight:700;">Activity</div>
+      <button class="btn" onclick="stopScan()">Stop</button>
+    </div>
+    <div class="log" id="log"></div>
+  </div>
+
+<script>
+async function fetchStats() {
+  try {
+    const res = await fetch('/stats');
+    const data = await res.json();
+    document.getElementById('status').textContent = data.status || 'Idle';
+    document.getElementById('scanned').textContent = data.scanned ?? 0;
+    document.getElementById('matched').textContent = data.matched ?? 0;
+    document.getElementById('deleted').textContent = data.deleted ?? 0;
+    document.getElementById('cost').textContent = `$${(data.cost || 0).toFixed(4)}`;
+    document.getElementById('meta').textContent = data.meta || '';
+
+    const logEl = document.getElementById('log');
+    logEl.innerHTML = (data.history || []).map(l => `<div>${l}</div>`).join('');
+    logEl.scrollTop = logEl.scrollHeight;
+
+    if (data.current_photo) {
+      document.getElementById('photo-name').textContent = data.current_photo.name || '';
+      document.getElementById('reason').textContent = data.current_photo.reason || '';
+      const conf = Math.round((data.current_photo.confidence || 0) * 100);
+      document.getElementById('confidence').textContent = `Confidence: ${conf}%`;
+      document.getElementById('photo-img').src = `data:image/jpeg;base64,${data.current_photo.data}`;
+    }
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+async function stopScan() {
+  await fetch('/stop', { method: 'POST' });
+}
+
+setInterval(fetchStats, 1000);
+</script>
+</body>
+</html>
+"""
+
+def find_free_port(start: int = 5000, end: int = 5020) -> Optional[int]:
+    for port in range(start, end):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            if s.connect_ex(("localhost", port)) != 0:
+                return port
+    return None
 
 try:
     import osxphotos
@@ -356,6 +480,114 @@ Respond with JSON only: {"match": true/false, "confidence": 0.0-1.0, "reason": "
         return stats
 
 
+def estimate_cost(model: str) -> float:
+    price = PRICE_PER_MILLION.get(model, PRICE_PER_MILLION.get("gpt-5-mini", 0.25))
+    return price * TOKENS_PER_IMAGE / 1_000_000
+
+
+def run_scan_thread(cleaner: "PhotoCleaner", description: str, limit: Optional[int], album: Optional[str], dry_run: bool):
+    """Background scan feeding the dashboard."""
+    scan_state["is_running"] = True
+    scan_state["stop_requested"] = False
+    scan_state["stats"] = {"scanned": 0, "matched": 0, "deleted": 0, "cost": 0.0}
+    scan_state["history"] = []
+    scan_state["status"] = "Loading Photos..."
+    scan_state["meta"] = f"{cleaner.backend} • {cleaner.model} • limit={limit or 'all'} • {'dry-run' if dry_run else 'delete'} • desc='{description}'"
+
+    try:
+        cleaner.load_photos_library()
+        photos = cleaner.get_photos(limit=limit, album=album)
+        est_per_image = estimate_cost(cleaner.model) if cleaner.backend == "openai" else 0.0
+
+        for photo in photos:
+            if scan_state["stop_requested"]:
+                break
+
+            filename = photo.original_filename or "Unknown"
+            scan_state["status"] = f"Analyzing {filename}"
+            scan_state["stats"]["scanned"] += 1
+
+            img_data, mime = cleaner.encode_image(photo)
+            if not img_data:
+                continue
+
+            if cleaner.backend == "openai":
+                res = cleaner.analyze_openai(img_data, mime, description)
+            else:
+                res = cleaner.analyze_ollama(img_data, description)
+
+            conf = res.get("confidence", 0)
+            is_match = res.get("match", False) and conf >= cleaner.confidence_threshold
+            if cleaner.backend == "openai":
+                scan_state["stats"]["cost"] += est_per_image
+
+            scan_state["current_photo"] = {
+                "name": filename,
+                "data": img_data,
+                "reason": res.get("reason", ""),
+                "confidence": conf,
+                "is_match": is_match,
+            }
+
+            if is_match:
+                scan_state["stats"]["matched"] += 1
+                scan_state["history"].append(f"MATCH {filename} ({conf:.0%})")
+                if not dry_run:
+                    cleaner.move_to_trash_via_applescript([photo.uuid])
+                    scan_state["stats"]["deleted"] += 1
+                    scan_state["history"].append(f"DELETED {filename}")
+            time.sleep(0.05)
+
+    except Exception as e:
+        scan_state["history"].append(f"ERROR: {e}")
+    finally:
+        scan_state["status"] = "Complete" if not scan_state.get("stop_requested") else "Stopped"
+        scan_state["is_running"] = False
+
+
+def start_dashboard(cleaner: "PhotoCleaner", description: str, limit: Optional[int], album: Optional[str], dry_run: bool):
+    if not FLASK_AVAILABLE:
+        print("❌ Flask is required for the dashboard. Install with: pip install flask")
+        sys.exit(1)
+
+    app = Flask(__name__)
+
+    @app.route("/")
+    def home():
+        return render_template_string(HTML_TEMPLATE)
+
+    @app.route("/stats")
+    def stats():
+        s = scan_state
+        return jsonify({
+            "status": s.get("status", "Idle"),
+            "scanned": s["stats"].get("scanned", 0),
+            "matched": s["stats"].get("matched", 0),
+            "deleted": s["stats"].get("deleted", 0),
+            "cost": s["stats"].get("cost", 0.0),
+            "current_photo": s.get("current_photo"),
+            "history": s.get("history", [])[-200:],
+            "meta": s.get("meta", ""),
+        })
+
+    @app.route("/stop", methods=["POST"])
+    def stop():
+        scan_state["stop_requested"] = True
+        return jsonify({"status": "stopping"})
+
+    t = threading.Thread(target=run_scan_thread, args=(cleaner, description, limit, album, dry_run), daemon=True)
+    t.start()
+
+    port = find_free_port()
+    if not port:
+        print("❌ No free port found (5000-5020).")
+        sys.exit(1)
+
+    url = f"http://localhost:{port}"
+    print(f"\n🚀 Starting Web UI at {url}")
+    webbrowser.open(url)
+    app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
+
 def run_interactive():
     """Interactive prompts with sensible defaults."""
     print("\n" + "=" * 50)
@@ -402,7 +634,7 @@ def run_interactive():
         print("   Invalid limit, defaulting to 50")
         limit = 50
 
-    # 5) Visual Dashboard (default Y - note: minimal CLI only)
+    # 5) Visual Dashboard (default Y)
     vis_raw = input("5. Visual Dashboard? (Y/n) [Y]: ").strip().lower()
     visual = vis_raw != "n"
 
@@ -410,19 +642,21 @@ def run_interactive():
     dr_raw = input("6. Dry run (don't delete)? (Y/n) [Y]: ").strip().lower()
     dry_run = dr_raw != "n"
 
-    print("\n🚀 Starting CLI scan..." + (" (visual dashboard not available in this minimal build)" if visual else ""))
-
     cleaner = PhotoCleaner(
         backend=backend,
         model=model,
         confidence_threshold=0.7,
     )
 
-    cleaner.run(
-        description=description,
-        limit=limit,
-        dry_run=dry_run,
-    )
+    if visual:
+        start_dashboard(cleaner, description, limit, None, dry_run)
+    else:
+        print("\n🚀 Starting CLI scan...")
+        cleaner.run(
+            description=description,
+            limit=limit,
+            dry_run=dry_run,
+        )
 
 
 def main():
