@@ -679,74 +679,92 @@ DASHBOARD_HTML = """
             font-weight: 600;
         }
         
-        .matches-grid {
+        /* Two column layout */
+        .two-column {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-            gap: 1rem;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
         }
         
-        .match-card {
-            background: rgba(255, 255, 255, 0.02);
-            border: 1px solid var(--card-border);
-            border-radius: 16px;
-            overflow: hidden;
-            transition: all 0.3s ease;
+        @media (max-width: 900px) {
+            .two-column { grid-template-columns: 1fr; }
         }
         
-        .match-card:hover {
-            transform: translateY(-4px);
-            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.2);
-            border-color: var(--accent);
+        .two-column .card {
+            margin-bottom: 0;
         }
         
-        .match-image {
-            width: 100%;
-            height: 160px;
+        .matches-list {
+            max-height: 450px;
+            overflow-y: auto;
+            scrollbar-width: thin;
+            scrollbar-color: var(--card-border) transparent;
+        }
+        
+        .matches-list::-webkit-scrollbar {
+            width: 6px;
+        }
+        
+        .matches-list::-webkit-scrollbar-thumb {
+            background: var(--card-border);
+            border-radius: 3px;
+        }
+        
+        .match-item {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.75rem;
+            background: var(--success-bg);
+            border: 1px solid rgba(52, 211, 153, 0.3);
+            border-radius: 12px;
+            margin-bottom: 0.5rem;
+            transition: all 0.2s ease;
+        }
+        
+        .match-item:hover {
+            transform: translateX(4px);
+        }
+        
+        .match-thumb {
+            width: 56px;
+            height: 56px;
+            border-radius: 8px;
             object-fit: cover;
             background: rgba(0, 0, 0, 0.3);
+            flex-shrink: 0;
         }
         
-        .match-info {
-            padding: 1rem;
+        .match-content {
+            flex: 1;
+            min-width: 0;
         }
         
         .match-name {
             font-weight: 600;
-            font-size: 0.9rem;
-            margin-bottom: 0.35rem;
+            font-size: 0.85rem;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
         }
         
         .match-reason {
-            font-size: 0.8rem;
-            color: var(--text-muted);
-            margin-bottom: 0.75rem;
-            line-height: 1.4;
-            display: -webkit-box;
-            -webkit-line-clamp: 2;
-            -webkit-box-orient: vertical;
-            overflow: hidden;
-        }
-        
-        .match-footer {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        .confidence-badge {
             font-size: 0.75rem;
-            font-weight: 600;
-            padding: 0.3rem 0.6rem;
-            border-radius: 8px;
-            background: var(--success-bg);
-            color: var(--success);
+            color: var(--text-muted);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
         
-        .confidence-badge.high { background: var(--success-bg); color: var(--success); }
-        .confidence-badge.medium { background: rgba(251, 191, 36, 0.15); color: var(--warning); }
+        .match-badge {
+            font-size: 0.7rem;
+            padding: 0.25rem 0.5rem;
+            border-radius: 6px;
+            font-weight: 600;
+            background: var(--success);
+            color: white;
+            flex-shrink: 0;
+        }
         
         .match-type {
             font-size: 0.7rem;
@@ -960,37 +978,38 @@ DASHBOARD_HTML = """
             </div>
         </div>
         
-        <div class="card">
-            <div class="matches-header">
-                <div class="matches-title">
-                    <span>🎯</span>
-                    <span>Matched Photos</span>
-                    <span class="matches-count" id="matchCount">0</span>
+        <div class="two-column">
+            <div class="card">
+                <div class="matches-header">
+                    <div class="matches-title">
+                        <span>🎯</span>
+                        <span>Matched Photos</span>
+                        <span class="matches-count" id="matchCount">0</span>
+                    </div>
+                </div>
+                
+                <div class="matches-list" id="matchesGrid">
+                    <div class="no-matches">
+                        <div class="no-matches-icon">🔍</div>
+                        <div>No matches yet</div>
+                    </div>
                 </div>
             </div>
             
-            <div class="matches-grid" id="matchesGrid">
-                <div class="no-matches">
-                    <div class="no-matches-icon">🔍</div>
-                    <div>No matches found yet</div>
-                    <div style="font-size: 0.85rem; margin-top: 0.5rem;">Matches will appear here as photos are scanned</div>
+            <div class="card">
+                <div class="matches-header">
+                    <div class="matches-title">
+                        <span>📜</span>
+                        <span>Activity Feed</span>
+                        <span class="matches-count" id="scanCount">0</span>
+                    </div>
                 </div>
-            </div>
-        </div>
-        
-        <div class="card">
-            <div class="matches-header">
-                <div class="matches-title">
-                    <span>📜</span>
-                    <span>Activity Feed</span>
-                    <span class="matches-count" id="scanCount">0</span>
-                </div>
-            </div>
-            
-            <div class="activity-feed" id="activityFeed">
-                <div class="no-matches">
-                    <div class="no-matches-icon">⏳</div>
-                    <div>Waiting for scan to start...</div>
+                
+                <div class="activity-feed" id="activityFeed">
+                    <div class="no-matches">
+                        <div class="no-matches-icon">⏳</div>
+                        <div>Waiting...</div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1052,26 +1071,21 @@ DASHBOARD_HTML = """
                     // Match count badge
                     document.getElementById('matchCount').textContent = data.matched;
                     
-                    // Matches grid
+                    // Matches list
                     const grid = document.getElementById('matchesGrid');
                     if (data.matches && data.matches.length > 0) {
                         grid.innerHTML = data.matches.map(m => {
                             const conf = Math.round(m.confidence * 100);
-                            const confClass = conf >= 85 ? 'high' : 'medium';
                             return `
-                                <div class="match-card">
-                                    <img class="match-image" 
+                                <div class="match-item">
+                                    <img class="match-thumb" 
                                          src="/api/thumb/${encodeURIComponent(m.path || '')}" 
-                                         onerror="this.style.background='linear-gradient(135deg,#1a1a2e,#16213e)';this.style.display='flex'" 
-                                         alt="${m.filename}" />
-                                    <div class="match-info">
+                                         onerror="this.style.background='linear-gradient(135deg,#1a1a2e,#16213e)'" />
+                                    <div class="match-content">
                                         <div class="match-name">${m.filename}</div>
                                         <div class="match-reason">${m.reason}</div>
-                                        <div class="match-footer">
-                                            <span class="confidence-badge ${confClass}">${conf}% match</span>
-                                            <span class="match-type">AI Detected</span>
-                                        </div>
                                     </div>
+                                    <div class="match-badge">${conf}%</div>
                                 </div>
                             `;
                         }).join('');
