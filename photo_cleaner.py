@@ -701,10 +701,10 @@ class PhotoCleaner:
             return self.analyze_ollama(image_data, description)
 
     def delete_photos(self, uuids: list[str]) -> int:
-        """Add photos to 'AI Matches - Delete' album for manual review.
+        """Add photos to '🤖 AI Matches - To Delete' album.
         
-        Note: Direct deletion via AppleScript is unreliable on modern macOS.
-        This creates an album with matched photos for easy batch deletion.
+        Note: Direct deletion via AppleScript is blocked on modern macOS (security).
+        Photos are added to a dedicated album for easy batch deletion.
         """
         if not uuids:
             return 0
@@ -714,7 +714,6 @@ class PhotoCleaner:
         
         script = f'''
         tell application "Photos"
-            -- Create or get album
             set albumName to "{album_name}"
             set targetAlbum to missing value
             
@@ -724,7 +723,6 @@ class PhotoCleaner:
                 set targetAlbum to make new album named albumName
             end try
             
-            -- Add photos to album
             set addedCount to 0
             set uuidList to {{"{uuid_list}"}}
             
@@ -742,20 +740,33 @@ class PhotoCleaner:
         
         try:
             result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=120)
-            if result.returncode == 0:
-                count = result.stdout.strip()
-                if count.isdigit():
-                    added = int(count)
-                    if added > 0:
-                        print(f"\n   📁 Added {added} photos to album: '{album_name}'")
-                        print(f"      Open Photos app → Albums → '{album_name}' to review & delete")
-                    return added
+            if result.returncode == 0 and result.stdout.strip().isdigit():
+                added = int(result.stdout.strip())
+                if added > 0:
+                    log_line(f"ADDED TO ALBUM | count={added}")
+                return added
             else:
                 log_line(f"ALBUM ERROR: {result.stderr}")
         except Exception as e:
             log_line(f"ALBUM EXCEPTION: {e}")
         
         return 0
+    
+    def open_delete_album(self):
+        """Open Photos app and navigate to the delete album."""
+        script = '''
+        tell application "Photos"
+            activate
+            delay 0.5
+            try
+                reveal album "🤖 AI Matches - To Delete"
+            end try
+        end tell
+        '''
+        try:
+            subprocess.run(["osascript", "-e", script], capture_output=True, timeout=10)
+        except:
+            pass
 
     def run_parallel(
         self,
@@ -859,8 +870,9 @@ class PhotoCleaner:
                     if added > 0:
                         with state_lock:
                             scan_state["stats"]["deleted"] += 1
-                            scan_state["history"].append(f"   📁 Added to album: {filename}")
+                            scan_state["history"].append(f"   📁 → Album: {filename}")
                         log_line(f"REALTIME ADD SUCCESS | {filename}")
+                        print(f"      📁 Added to delete album")
                     return None  # Already processed, don't add to to_delete list
                 
                 return photo.uuid
@@ -941,9 +953,9 @@ class PhotoCleaner:
         print(f"   Cost:     ${stats['cost']:.4f}")
         
         if stats['deleted'] > 0:
-            print(f"\n   📁 Review matches in Photos app:")
-            print(f"      Albums → '🤖 AI Matches - To Delete'")
-            print(f"      Select all (⌘A) → Delete (⌫)")
+            print(f"\n   📁 Opening Photos app...")
+            print(f"      → Select all (⌘A) → Delete (⌫)")
+            self.open_delete_album()
         print(f"{'='*50}\n")
         
         log_line(f"END | scanned={stats['scanned']} | matched={stats['matched']} | deleted={stats['deleted']} | stopped={was_stopped} | time={elapsed:.1f}s")
@@ -1182,9 +1194,12 @@ def run_interactive():
         model = "gpt-5-mini" if backend == "openai" else "moondream"
 
     # 3) Description
-    desc = ""
-    while not desc:
-        desc = input("\n3. Describe photos to delete: ").strip()
+    default_desc = "banking, payments, and messaging screenshots (Instagram, WhatsApp, iMessage)"
+    print(f"\n3. Describe photos to find:")
+    print(f"   Default: '{default_desc}'")
+    desc = input("   Your description (Enter for default): ").strip()
+    if not desc:
+        desc = default_desc
 
     # 4) Limit
     lim = input("4. Limit [50 | all]: ").strip().lower()
