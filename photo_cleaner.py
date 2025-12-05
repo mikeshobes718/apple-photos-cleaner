@@ -158,34 +158,60 @@ HTML_TEMPLATE = """
   <title>🧹 Apple Photos Cleaner</title>
   <style>
     * { box-sizing: border-box; }
+    :root {
+      --bg-primary: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      --bg-card: rgba(255,255,255,0.05);
+      --bg-input: #0f172a;
+      --border: rgba(255,255,255,0.1);
+      --text-primary: #e8e8e8;
+      --text-secondary: #94a3b8;
+      --text-muted: #475569;
+    }
+    .light-mode {
+      --bg-primary: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+      --bg-card: rgba(255,255,255,0.9);
+      --bg-input: #f1f5f9;
+      --border: rgba(0,0,0,0.1);
+      --text-primary: #1e293b;
+      --text-secondary: #475569;
+      --text-muted: #94a3b8;
+    }
     body { 
       font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif; 
       margin: 0; padding: 20px; 
-      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-      color: #e8e8e8; min-height: 100vh;
+      background: var(--bg-primary);
+      color: var(--text-primary); min-height: 100vh;
+      transition: background 0.3s, color 0.3s;
     }
     .container { max-width: 1200px; margin: 0 auto; }
     header { 
       display: flex; justify-content: space-between; align-items: center; 
       margin-bottom: 20px; padding-bottom: 16px;
-      border-bottom: 1px solid rgba(255,255,255,0.1);
+      border-bottom: 1px solid var(--border);
     }
     h1 { margin: 0; font-size: 28px; font-weight: 700; }
-    .meta { color: #94a3b8; font-size: 13px; margin-top: 4px; }
+    .meta { color: var(--text-secondary); font-size: 13px; margin-top: 4px; }
+    .header-right { display: flex; align-items: center; gap: 12px; }
     .badge { 
       padding: 6px 14px; border-radius: 20px; font-weight: 600; font-size: 13px;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;
     }
+    .theme-toggle {
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: 20px; padding: 6px 12px; cursor: pointer;
+      font-size: 16px; transition: transform 0.2s;
+    }
+    .theme-toggle:hover { transform: scale(1.1); }
     .stats { 
       display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); 
       gap: 12px; margin-bottom: 20px;
     }
     .stat-card { 
-      background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+      background: var(--bg-card); border: 1px solid var(--border);
       border-radius: 12px; padding: 16px; text-align: center;
       backdrop-filter: blur(10px);
     }
-    .stat-label { color: #94a3b8; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .stat-label { color: var(--text-secondary); font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
     .stat-value { font-size: 32px; font-weight: 700; margin-top: 4px; }
     .stat-value.matched { color: #f97316; }
     .stat-value.deleted { color: #ef4444; }
@@ -194,27 +220,27 @@ HTML_TEMPLATE = """
     .main-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
     @media (max-width: 900px) { .main-grid { grid-template-columns: 1fr; } }
     .card { 
-      background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+      background: var(--bg-card); border: 1px solid var(--border);
       border-radius: 16px; padding: 20px; backdrop-filter: blur(10px);
     }
     .card-title { font-weight: 600; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; }
     .photo-container { 
-      background: #0f172a; border-radius: 12px; 
+      background: var(--bg-input); border-radius: 12px; 
       display: flex; align-items: center; justify-content: center;
       min-height: 300px; overflow: hidden; position: relative;
     }
     .photo-container img { max-width: 100%; max-height: 400px; object-fit: contain; border-radius: 8px; }
-    .photo-name { color: #94a3b8; font-size: 14px; margin-top: 12px; }
-    .reason { margin-top: 12px; padding: 12px; background: rgba(0,0,0,0.3); border-radius: 8px; font-size: 14px; line-height: 1.5; }
+    .photo-name { color: var(--text-secondary); font-size: 14px; margin-top: 12px; }
+    .reason { margin-top: 12px; padding: 12px; background: var(--bg-input); border-radius: 8px; font-size: 14px; line-height: 1.5; }
     .confidence-bar { 
-      height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; 
+      height: 6px; background: var(--border); border-radius: 3px; 
       margin-top: 12px; overflow: hidden;
     }
     .confidence-fill { height: 100%; background: linear-gradient(90deg, #10b981, #3b82f6); border-radius: 3px; transition: width 0.3s; }
     .log { 
-      height: 350px; overflow-y: auto; background: #0f172a; 
+      height: 350px; overflow-y: auto; background: var(--bg-input); 
       border-radius: 12px; padding: 12px; font-family: 'SF Mono', Monaco, monospace; font-size: 12px;
-      line-height: 1.6; color: #94a3b8;
+      line-height: 1.6; color: var(--text-secondary);
     }
     .log-entry { padding: 2px 0; }
     .log-entry.match { color: #f97316; font-weight: 600; }
@@ -228,15 +254,15 @@ HTML_TEMPLATE = """
     }
     .btn:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(239,68,68,0.4); }
     .progress { margin-top: 8px; }
-    .progress-text { font-size: 12px; color: #94a3b8; }
+    .progress-text { font-size: 12px; color: var(--text-secondary); }
     .match-badge { 
       position: absolute; top: 12px; right: 12px; 
       background: linear-gradient(135deg, #f97316 0%, #ea580c 100%);
-      padding: 6px 12px; border-radius: 6px; font-weight: 600; font-size: 12px;
+      padding: 6px 12px; border-radius: 6px; font-weight: 600; font-size: 12px; color: white;
       animation: pulse 1s infinite;
     }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
-    .waiting { color: #475569; font-size: 14px; }
+    .waiting { color: var(--text-muted); font-size: 14px; }
   </style>
 </head>
 <body>
@@ -246,7 +272,10 @@ HTML_TEMPLATE = """
         <h1>🧹 Apple Photos Cleaner</h1>
         <div class="meta" id="meta">Initializing...</div>
       </div>
-      <div><span id="status" class="badge">Starting</span></div>
+      <div class="header-right">
+        <button class="theme-toggle" onclick="toggleTheme()" title="Toggle light/dark mode" id="theme-btn">🌙</button>
+        <span id="status" class="badge">Starting</span>
+      </div>
     </header>
 
     <div class="stats">
@@ -354,6 +383,41 @@ async function stopScan() {
 }
 
 setInterval(fetchStats, 500);
+
+// Theme handling - respects system preference by default
+function getSystemTheme() {
+  return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+}
+
+function setTheme(theme) {
+  if (theme === 'light') {
+    document.body.classList.add('light-mode');
+    document.getElementById('theme-btn').textContent = '☀️';
+  } else {
+    document.body.classList.remove('light-mode');
+    document.getElementById('theme-btn').textContent = '🌙';
+  }
+  localStorage.setItem('theme', theme);
+}
+
+function toggleTheme() {
+  const isLight = document.body.classList.contains('light-mode');
+  setTheme(isLight ? 'dark' : 'light');
+}
+
+// Initialize theme on load
+(function() {
+  const saved = localStorage.getItem('theme');
+  const theme = saved || getSystemTheme();
+  setTheme(theme);
+  
+  // Listen for system theme changes
+  window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', (e) => {
+    if (!localStorage.getItem('theme')) {
+      setTheme(e.matches ? 'light' : 'dark');
+    }
+  });
+})();
 </script>
 </body>
 </html>
@@ -917,9 +981,9 @@ def run_interactive():
     vis = input("5. Visual Dashboard? (Y/n) [Y]: ").strip().lower()
     visual = vis != "n"
 
-    # 6) Dry run
-    dr = input("6. Dry run? (Y/n) [Y]: ").strip().lower()
-    dry_run = dr != "n"
+    # 6) Dry run (default No - will delete)
+    dr = input("6. Dry run (preview only)? (y/N) [N]: ").strip().lower()
+    dry_run = dr == "y"
 
     cleaner = PhotoCleaner(backend=backend, model=model)
 
