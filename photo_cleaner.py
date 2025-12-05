@@ -718,6 +718,7 @@ class PhotoCleaner:
         description: str,
         limit: Optional[int] = None,
         dry_run: bool = True,
+        realtime_delete: bool = False,
         on_progress: Optional[callable] = None,
     ) -> dict:
         """Run scan with parallel processing."""
@@ -737,7 +738,8 @@ class PhotoCleaner:
         with state_lock:
             scan_state["total_photos"] = total
             scan_state["status"] = "Scanning"
-            scan_state["meta"] = f"'{description}' | {self.backend}/{self.model} | {total} photos" + (" | DRY RUN" if dry_run else "")
+            mode_str = " | DRY RUN" if dry_run else (" | REALTIME DELETE" if realtime_delete else "")
+            scan_state["meta"] = f"'{description}' | {self.backend}/{self.model} | {total} photos{mode_str}"
         
         log_line(f"START | desc='{description}' | backend={self.backend} | model={self.model} | total={total} | dry_run={dry_run}")
         
@@ -803,6 +805,18 @@ class PhotoCleaner:
                     scan_state["matches"].append({"uuid": photo.uuid, "filename": filename})
                     scan_state["history"].append(f"⚡ MATCH: {filename} ({result.get('confidence', 0):.0%})")
                 log_line(f"MATCH | {filename} | conf={result.get('confidence', 0):.2f}")
+                
+                # Delete immediately if realtime mode
+                if realtime_delete and not dry_run:
+                    deleted = self.delete_photos([photo.uuid])
+                    if deleted > 0:
+                        with state_lock:
+                            scan_state["stats"]["deleted"] += 1
+                            scan_state["history"].append(f"   🗑️ Deleted: {filename}")
+                        log_line(f"REALTIME DELETE | {filename}")
+                        print(f"   🗑️ Deleted: {filename}")
+                    return None  # Already deleted, don't add to to_delete list
+                
                 return photo.uuid
             else:
                 with state_lock:
@@ -950,7 +964,7 @@ class PhotoCleaner:
 # ============================================================
 # Dashboard Server
 # ============================================================
-def start_dashboard(cleaner: PhotoCleaner, description: str, limit: Optional[int], album: Optional[str], dry_run: bool):
+def start_dashboard(cleaner: PhotoCleaner, description: str, limit: Optional[int], album: Optional[str], dry_run: bool, realtime_delete: bool = False):
     """Start Flask dashboard with background scan."""
     if not FLASK_AVAILABLE:
         print("❌ Flask not installed. Run: pip install flask")
@@ -1033,7 +1047,7 @@ def start_dashboard(cleaner: PhotoCleaner, description: str, limit: Optional[int
 
     # Start scan in background thread
     def run_scan():
-        cleaner.run_parallel(description, limit=limit, dry_run=dry_run)
+        cleaner.run_parallel(description, limit=limit, dry_run=dry_run, realtime_delete=realtime_delete)
 
     scan_thread = threading.Thread(target=run_scan, daemon=True)
     scan_thread.start()
@@ -1104,13 +1118,19 @@ def run_interactive():
     dr = input("6. Dry run (preview only)? (y/N) [N]: ").strip().lower()
     dry_run = dr == "y"
 
+    # 7) Delete in real-time (default No - delete at end)
+    realtime = False
+    if not dry_run:
+        rt = input("7. Delete matches immediately as found? (y/N) [N]: ").strip().lower()
+        realtime = rt == "y"
+
     cleaner = PhotoCleaner(backend=backend, model=model)
 
     if visual:
-        start_dashboard(cleaner, desc, limit, None, dry_run)
+        start_dashboard(cleaner, desc, limit, None, dry_run, realtime)
     else:
         print("\n🚀 Starting scan...")
-        cleaner.run_parallel(desc, limit=limit, dry_run=dry_run)
+        cleaner.run_parallel(desc, limit=limit, dry_run=dry_run, realtime_delete=realtime)
         
         # Print final summary
         with state_lock:
@@ -1132,6 +1152,7 @@ def main():
     parser.add_argument("description", nargs="?", help="Photos to find (omit for interactive)")
     parser.add_argument("--limit", type=int, help="Max photos to scan")
     parser.add_argument("--dry-run", action="store_true", help="Preview only")
+    parser.add_argument("--realtime", action="store_true", help="Delete matches immediately as found")
     parser.add_argument("--backend", choices=["openai", "ollama"], default="openai")
     parser.add_argument("--model", default="gpt-5-mini")
     parser.add_argument("--dashboard", action="store_true", help="Open web dashboard")
@@ -1145,9 +1166,9 @@ def main():
     cleaner = PhotoCleaner(backend=args.backend, model=args.model)
 
     if args.dashboard:
-        start_dashboard(cleaner, args.description, args.limit, None, args.dry_run)
+        start_dashboard(cleaner, args.description, args.limit, None, args.dry_run, args.realtime)
     else:
-        cleaner.run_parallel(args.description, limit=args.limit, dry_run=args.dry_run)
+        cleaner.run_parallel(args.description, limit=args.limit, dry_run=args.dry_run, realtime_delete=args.realtime)
 
 
 if __name__ == "__main__":
