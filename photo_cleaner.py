@@ -20,7 +20,9 @@ from pathlib import Path
 from typing import Optional
 from dotenv import load_dotenv
 
-load_dotenv() # Load variables from .env file
+# Load secrets from shared Keys folder
+ENV_PATH = "/Users/mike/Documents/Keys/.env"
+load_dotenv(ENV_PATH)
 
 try:
     import osxphotos
@@ -331,9 +333,72 @@ Respond with JSON only: {"match": true/false, "confidence": 0.0-1.0, "reason": "
         return stats
 
 
+def run_interactive():
+    """Interactive prompts with sensible defaults."""
+    print("\n" + "=" * 50)
+    print("  🧹 Apple Photos Cleaner (Interactive)")
+    print("=" * 50)
+
+    # 1) Backend (default OpenAI)
+    be_input = input("\n1. Backend: 1) OpenAI (default)  2) Ollama [1]: ").strip()
+    backend = "ollama" if be_input == "2" else "openai"
+
+    # 2) Model selection (default gpt-5-mini)
+    model_options = [
+        ("gpt-5.1", "Highest accuracy"),
+        ("gpt-5-mini", "Best balance (default)"),
+        ("gpt-5-nano", "Fastest & cheapest"),
+        ("gpt-4o", "Legacy strong multimodal"),
+        ("gpt-4o-mini", "Legacy budget"),
+    ] if backend == "openai" else [
+        ("moondream", "Local fast (default)"),
+        ("llava", "Local detailed"),
+    ]
+    print("\n2. Model choices:")
+    for idx, (name, desc) in enumerate(model_options, 1):
+        print(f"   {idx}. {name:<12} ({desc})")
+    model_choice = input("   Select [Enter for default]: ").strip()
+    if model_choice and model_choice.isdigit():
+        idx = int(model_choice) - 1
+        model = model_options[idx][0] if 0 <= idx < len(model_options) else model_options[1][0]
+    else:
+        model = "gpt-5-mini" if backend == "openai" else model_options[0][0]
+
+    # 3) Description
+    description = ""
+    while not description:
+        description = input("\n3. Describe photos to delete (e.g., 'bank statements'): ").strip()
+
+    # 4) Limit (default 50)
+    lim_raw = input("4. Limit photos to scan [50]: ").strip()
+    limit = int(lim_raw) if lim_raw.isdigit() else 50
+
+    # 5) Visual Dashboard (default Y - note: minimal CLI only)
+    vis_raw = input("5. Visual Dashboard? (Y/n) [Y]: ").strip().lower()
+    visual = vis_raw != "n"
+
+    # 6) Dry run (default Y)
+    dr_raw = input("6. Dry run (don't delete)? (Y/n) [Y]: ").strip().lower()
+    dry_run = dr_raw != "n"
+
+    print("\n🚀 Starting CLI scan..." + (" (visual dashboard not available in this minimal build)" if visual else ""))
+
+    cleaner = PhotoCleaner(
+        backend=backend,
+        model=model,
+        confidence_threshold=0.7,
+    )
+
+    cleaner.run(
+        description=description,
+        limit=limit,
+        dry_run=dry_run,
+    )
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Delete photos matching a description")
-    parser.add_argument("description", help="Description of photos to delete")
+    parser = argparse.ArgumentParser(description="Delete photos matching a description (defaults to interactive mode)")
+    parser.add_argument("description", nargs="?", help="Description of photos to delete (omit for interactive mode)")
     parser.add_argument("--limit", type=int, help="Max photos to scan")
     parser.add_argument("--album", help="Only scan this album")
     parser.add_argument("--dry-run", action="store_true", help="Don't delete anything")
@@ -342,33 +407,46 @@ def main():
     
     # Backend arguments
     parser.add_argument("--backend", choices=["openai", "ollama"], default="openai", help="AI backend to use")
-    parser.add_argument("--model", nargs='?', const='SELECT_MODE', help="Model name (default: gpt-4o-mini for openai, moondream for ollama)")
+    parser.add_argument("--model", nargs='?', const='SELECT_MODE', help="Model name (default: gpt-5-mini for openai, moondream for ollama)")
 
     args = parser.parse_args()
+
+    # If no description provided, run interactive mode
+    if not args.description:
+        run_interactive()
+        return
 
     # Handle model selection if --model is used without value
     if args.model == 'SELECT_MODE':
         print("\n🤖 Select a Vision Model:")
-        print("   1. gpt-4o        (Best Intelligence - Smartest for complex images)")
-        print("   2. gpt-4o-mini   (Best Value - Fast, cheap, good enough)")
-        print("   3. gpt-4-turbo   (Legacy High End - Good, but slower/pricier)")
-        print("   4. moondream     (Local/Free - Runs on your machine via Ollama)")
-        print("   5. Custom...     (Enter your own model name)")
+        print("   1. gpt-5.1        (Highest accuracy)")
+        print("   2. gpt-5-mini     (Best balance - default)")
+        print("   3. gpt-5-nano     (Fastest & cheapest)")
+        print("   4. gpt-4o         (Legacy strong multimodal)")
+        print("   5. gpt-4o-mini    (Legacy budget)")
+        print("   6. moondream      (Local/Free via Ollama)")
+        print("   7. Custom...      (Enter your own model name)")
         
-        choice = input("\n   Choose model [1-5]: ").strip()
+        choice = input("\n   Choose model [1-7]: ").strip()
         if choice == '1':
-            args.model = "gpt-4o"
+            args.model = "gpt-5.1"
             args.backend = "openai"
         elif choice == '2':
-            args.model = "gpt-4o-mini"
+            args.model = "gpt-5-mini"
             args.backend = "openai"
         elif choice == '3':
-            args.model = "gpt-4-turbo"
+            args.model = "gpt-5-nano"
             args.backend = "openai"
         elif choice == '4':
+            args.model = "gpt-4o"
+            args.backend = "openai"
+        elif choice == '5':
+            args.model = "gpt-4o-mini"
+            args.backend = "openai"
+        elif choice == '6':
             args.model = "moondream"
             args.backend = "ollama"
-        elif choice == '5':
+        elif choice == '7':
             args.model = input("   Enter model name: ").strip()
             # Guess backend based on common names, default to openai
             if "llama" in args.model or "dream" in args.model:
@@ -376,13 +454,13 @@ def main():
             else:
                 args.backend = "openai"
         else:
-            print("   Invalid choice, defaulting to gpt-4o-mini")
-            args.model = "gpt-4o-mini"
+            print("   Invalid choice, defaulting to gpt-5-mini")
+            args.model = "gpt-5-mini"
             args.backend = "openai"
 
     # Default models
     if not args.model:
-        args.model = "gpt-4o-mini" if args.backend == "openai" else "moondream"
+        args.model = "gpt-5-mini" if args.backend == "openai" else "moondream"
 
     # Check API key for OpenAI
     # if args.backend == "openai" and not os.getenv("OPENAI_API_KEY"):
