@@ -818,6 +818,8 @@ class PhotoCleaner:
                     scan_state["stats"]["matched"] += 1
                     scan_state["matches"].append({"uuid": photo.uuid, "filename": filename})
                     scan_state["history"].append(f"⚡ MATCH: {filename} ({result.get('confidence', 0):.0%})")
+                print(f"\n   ⚡ MATCH: {filename} ({result.get('confidence', 0):.0%})")
+                print(f"      Reason: {result.get('reason', 'N/A')}")
                 log_line(f"MATCH | {filename} | conf={result.get('confidence', 0):.2f}")
                 
                 # Delete immediately if realtime mode
