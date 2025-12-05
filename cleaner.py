@@ -327,198 +327,567 @@ DASHBOARD_HTML = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🧹 Photo Cleaner</title>
+    <title>Photo Cleaner Pro</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
         :root {
-            --bg: #0d1117;
-            --card: #161b22;
-            --border: #30363d;
-            --text: #c9d1d9;
-            --accent: #58a6ff;
-            --green: #3fb950;
-            --red: #f85149;
-            --yellow: #d29922;
+            --bg-gradient: linear-gradient(135deg, #0c0c0c 0%, #1a1a2e 50%, #16213e 100%);
+            --card-bg: rgba(255, 255, 255, 0.03);
+            --card-border: rgba(255, 255, 255, 0.08);
+            --card-glow: rgba(99, 102, 241, 0.1);
+            --text-primary: #f8fafc;
+            --text-secondary: rgba(248, 250, 252, 0.6);
+            --text-muted: rgba(248, 250, 252, 0.4);
+            --accent: #818cf8;
+            --accent-glow: rgba(129, 140, 248, 0.4);
+            --success: #34d399;
+            --success-bg: rgba(52, 211, 153, 0.15);
+            --danger: #f87171;
+            --danger-bg: rgba(248, 113, 113, 0.15);
+            --warning: #fbbf24;
         }
+        
         .light {
-            --bg: #f6f8fa;
-            --card: #ffffff;
-            --border: #d0d7de;
-            --text: #24292f;
-            --accent: #0969da;
+            --bg-gradient: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 50%, #cbd5e1 100%);
+            --card-bg: rgba(255, 255, 255, 0.7);
+            --card-border: rgba(0, 0, 0, 0.08);
+            --card-glow: rgba(99, 102, 241, 0.08);
+            --text-primary: #0f172a;
+            --text-secondary: rgba(15, 23, 42, 0.7);
+            --text-muted: rgba(15, 23, 42, 0.5);
+            --accent: #6366f1;
+            --accent-glow: rgba(99, 102, 241, 0.3);
         }
+        
         * { box-sizing: border-box; margin: 0; padding: 0; }
+        
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: var(--bg);
-            color: var(--text);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-gradient);
+            background-attachment: fixed;
+            color: var(--text-primary);
             min-height: 100vh;
             padding: 2rem;
+            line-height: 1.6;
         }
-        .container { max-width: 900px; margin: 0 auto; }
+        
+        .container {
+            max-width: 1100px;
+            margin: 0 auto;
+        }
+        
+        /* Header */
         header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 2rem;
+            margin-bottom: 2.5rem;
+            padding-bottom: 1.5rem;
+            border-bottom: 1px solid var(--card-border);
         }
-        h1 { font-size: 1.8rem; }
-        .theme-toggle {
-            background: var(--card);
-            border: 1px solid var(--border);
-            color: var(--text);
-            padding: 0.5rem 1rem;
-            border-radius: 6px;
-            cursor: pointer;
+        
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
         }
-        .card {
-            background: var(--card);
-            border: 1px solid var(--border);
+        
+        .logo-icon {
+            width: 48px;
+            height: 48px;
+            background: linear-gradient(135deg, var(--accent), #a78bfa);
             border-radius: 12px;
-            padding: 1.5rem;
-            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            box-shadow: 0 8px 32px var(--accent-glow);
         }
-        .status {
+        
+        .logo-text h1 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+        }
+        
+        .logo-text span {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+        }
+        
+        .theme-toggle {
+            width: 44px;
+            height: 44px;
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 12px;
+            color: var(--text-primary);
+            cursor: pointer;
             font-size: 1.2rem;
-            margin-bottom: 1rem;
+            transition: all 0.3s ease;
+            backdrop-filter: blur(10px);
+        }
+        
+        .theme-toggle:hover {
+            background: var(--card-glow);
+            transform: scale(1.05);
+        }
+        
+        /* Cards */
+        .card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 20px;
+            padding: 1.75rem;
+            margin-bottom: 1.5rem;
+            backdrop-filter: blur(20px);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+        }
+        
+        /* Status Section */
+        .status-header {
             display: flex;
             align-items: center;
-            gap: 0.5rem;
+            justify-content: space-between;
+            margin-bottom: 1.25rem;
         }
-        .status.running::before { content: '🔄'; animation: spin 1s linear infinite; }
-        .status.complete::before { content: '✅'; }
-        .status.idle::before { content: '⏸️'; }
-        @keyframes spin { to { transform: rotate(360deg); } }
-        .progress-bar {
-            height: 8px;
-            background: var(--border);
-            border-radius: 4px;
-            overflow: hidden;
-            margin: 1rem 0;
+        
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
         }
-        .progress-fill {
-            height: 100%;
+        
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: var(--text-muted);
+        }
+        
+        .status-dot.running {
+            background: var(--success);
+            box-shadow: 0 0 12px var(--success);
+            animation: pulse 2s infinite;
+        }
+        
+        .status-dot.complete {
             background: var(--accent);
-            transition: width 0.3s;
+            box-shadow: 0 0 12px var(--accent);
         }
-        .stats {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-            gap: 1rem;
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.7; transform: scale(1.1); }
         }
-        .stat {
-            text-align: center;
-            padding: 1rem;
-            background: var(--bg);
-            border-radius: 8px;
+        
+        .status-text {
+            font-size: 1.1rem;
+            font-weight: 500;
         }
-        .stat-value {
-            font-size: 2rem;
-            font-weight: bold;
-            color: var(--accent);
+        
+        .status-badge {
+            font-size: 0.75rem;
+            padding: 0.35rem 0.75rem;
+            border-radius: 20px;
+            background: var(--card-glow);
+            color: var(--text-secondary);
+            font-weight: 500;
         }
-        .stat-label { font-size: 0.85rem; opacity: 0.7; }
-        .matches { margin-top: 1rem; }
-        .match {
-            display: flex;
-            align-items: center;
-            gap: 1rem;
-            padding: 0.75rem;
-            background: var(--bg);
-            border-radius: 8px;
-            margin-bottom: 0.5rem;
-        }
-        .match-thumb {
-            width: 80px;
-            height: 80px;
-            object-fit: cover;
-            border-radius: 6px;
-            background: var(--border);
-        }
-        .match-info { flex: 1; }
-        .match-name { font-weight: 500; }
-        .match-reason { font-size: 0.85rem; opacity: 0.7; }
-        .confidence {
-            background: var(--green);
-            color: white;
-            padding: 0.25rem 0.5rem;
-            border-radius: 4px;
+        
+        .current-file {
             font-size: 0.85rem;
-        }
-        .current-photo {
-            font-size: 0.95rem;
-            opacity: 0.8;
+            color: var(--text-muted);
+            margin-bottom: 1.25rem;
+            font-family: 'SF Mono', Monaco, monospace;
+            padding: 0.5rem 0.75rem;
+            background: rgba(0,0,0,0.2);
+            border-radius: 8px;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
         }
-        .buttons {
+        
+        /* Progress Bar */
+        .progress-container {
+            margin-bottom: 1.75rem;
+        }
+        
+        .progress-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 0.5rem;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+        }
+        
+        .progress-bar {
+            height: 8px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--accent), #a78bfa);
+            border-radius: 10px;
+            transition: width 0.4s ease;
+            box-shadow: 0 0 20px var(--accent-glow);
+        }
+        
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+        
+        @media (max-width: 768px) {
+            .stats-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+        
+        .stat-card {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--card-border);
+            border-radius: 16px;
+            padding: 1.25rem;
+            text-align: center;
+            transition: all 0.3s ease;
+        }
+        
+        .stat-card:hover {
+            background: var(--card-glow);
+            transform: translateY(-2px);
+        }
+        
+        .stat-card.highlight {
+            background: var(--success-bg);
+            border-color: rgba(52, 211, 153, 0.3);
+        }
+        
+        .stat-icon {
+            font-size: 1.5rem;
+            margin-bottom: 0.5rem;
+        }
+        
+        .stat-value {
+            font-size: 2rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, var(--text-primary), var(--accent));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .stat-card.highlight .stat-value {
+            background: linear-gradient(135deg, var(--success), #6ee7b7);
+            -webkit-background-clip: text;
+            background-clip: text;
+        }
+        
+        .stat-label {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-top: 0.25rem;
+        }
+        
+        /* Action Buttons */
+        .actions {
             display: flex;
             gap: 1rem;
-            margin-top: 1rem;
         }
-        button {
-            padding: 0.75rem 1.5rem;
+        
+        .btn {
+            flex: 1;
+            padding: 1rem 1.5rem;
             border: none;
-            border-radius: 8px;
+            border-radius: 14px;
+            font-size: 0.95rem;
+            font-weight: 600;
             cursor: pointer;
-            font-size: 1rem;
-            transition: opacity 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            transition: all 0.3s ease;
+            font-family: inherit;
         }
-        button:hover { opacity: 0.8; }
-        button:disabled { opacity: 0.5; cursor: not-allowed; }
-        .btn-stop { background: var(--red); color: white; }
-        .btn-album { background: var(--green); color: white; }
+        
+        .btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            transform: none !important;
+        }
+        
+        .btn-danger {
+            background: var(--danger-bg);
+            color: var(--danger);
+            border: 1px solid rgba(248, 113, 113, 0.3);
+        }
+        
+        .btn-danger:hover:not(:disabled) {
+            background: var(--danger);
+            color: white;
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px rgba(248, 113, 113, 0.3);
+        }
+        
+        .btn-success {
+            background: var(--success-bg);
+            color: var(--success);
+            border: 1px solid rgba(52, 211, 153, 0.3);
+        }
+        
+        .btn-success:hover:not(:disabled) {
+            background: var(--success);
+            color: white;
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px rgba(52, 211, 153, 0.3);
+        }
+        
+        /* Matches Section */
+        .matches-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 1.25rem;
+        }
+        
+        .matches-title {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            font-size: 1.1rem;
+            font-weight: 600;
+        }
+        
+        .matches-count {
+            background: var(--accent);
+            color: white;
+            font-size: 0.75rem;
+            padding: 0.25rem 0.6rem;
+            border-radius: 20px;
+            font-weight: 600;
+        }
+        
+        .matches-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 1rem;
+        }
+        
+        .match-card {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--card-border);
+            border-radius: 16px;
+            overflow: hidden;
+            transition: all 0.3s ease;
+        }
+        
+        .match-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.2);
+            border-color: var(--accent);
+        }
+        
+        .match-image {
+            width: 100%;
+            height: 160px;
+            object-fit: cover;
+            background: rgba(0, 0, 0, 0.3);
+        }
+        
+        .match-info {
+            padding: 1rem;
+        }
+        
+        .match-name {
+            font-weight: 600;
+            font-size: 0.9rem;
+            margin-bottom: 0.35rem;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        
+        .match-reason {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin-bottom: 0.75rem;
+            line-height: 1.4;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+        
+        .match-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .confidence-badge {
+            font-size: 0.75rem;
+            font-weight: 600;
+            padding: 0.3rem 0.6rem;
+            border-radius: 8px;
+            background: var(--success-bg);
+            color: var(--success);
+        }
+        
+        .confidence-badge.high { background: var(--success-bg); color: var(--success); }
+        .confidence-badge.medium { background: rgba(251, 191, 36, 0.15); color: var(--warning); }
+        
+        .match-type {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        
+        .no-matches {
+            text-align: center;
+            padding: 3rem;
+            color: var(--text-muted);
+        }
+        
+        .no-matches-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+            opacity: 0.5;
+        }
+        
+        /* Description display */
+        .search-query {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.75rem 1rem;
+            background: rgba(129, 140, 248, 0.1);
+            border: 1px solid rgba(129, 140, 248, 0.2);
+            border-radius: 12px;
+            margin-bottom: 1.5rem;
+            font-size: 0.9rem;
+        }
+        
+        .search-query-label {
+            color: var(--text-muted);
+        }
+        
+        .search-query-text {
+            color: var(--accent);
+            font-weight: 500;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>🧹 Photo Cleaner</h1>
-            <button class="theme-toggle" onclick="toggleTheme()">🌙 / ☀️</button>
+            <div class="logo">
+                <div class="logo-icon">🧹</div>
+                <div class="logo-text">
+                    <span>AI Powered</span>
+                    <h1>Photo Cleaner</h1>
+                </div>
+            </div>
+            <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">
+                <span id="themeIcon">🌙</span>
+            </button>
         </header>
         
         <div class="card">
-            <div class="status" id="status">Loading...</div>
-            <div class="current-photo" id="currentPhoto"></div>
-            <div class="progress-bar">
-                <div class="progress-fill" id="progress" style="width: 0%"></div>
+            <div class="status-header">
+                <div class="status-indicator">
+                    <div class="status-dot" id="statusDot"></div>
+                    <span class="status-text" id="statusText">Initializing...</span>
+                </div>
+                <span class="status-badge" id="modeBadge">SCANNING</span>
             </div>
-            <div class="stats">
-                <div class="stat">
+            
+            <div class="search-query" id="searchQuery" style="display: none;">
+                <span class="search-query-label">Looking for:</span>
+                <span class="search-query-text" id="searchText"></span>
+            </div>
+            
+            <div class="current-file" id="currentFile">Waiting...</div>
+            
+            <div class="progress-container">
+                <div class="progress-header">
+                    <span id="progressText">0 of 0 photos</span>
+                    <span id="progressPct">0%</span>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+                </div>
+            </div>
+            
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-icon">📷</div>
                     <div class="stat-value" id="scanned">0</div>
                     <div class="stat-label">Scanned</div>
                 </div>
-                <div class="stat">
+                <div class="stat-card highlight">
+                    <div class="stat-icon">✨</div>
                     <div class="stat-value" id="matched">0</div>
                     <div class="stat-label">Matches</div>
                 </div>
-                <div class="stat">
+                <div class="stat-card">
+                    <div class="stat-icon">📁</div>
                     <div class="stat-value" id="added">0</div>
-                    <div class="stat-label">Added</div>
+                    <div class="stat-label">Added to Album</div>
                 </div>
-                <div class="stat">
-                    <div class="stat-value" id="rate">0</div>
-                    <div class="stat-label">Rate/sec</div>
+                <div class="stat-card">
+                    <div class="stat-icon">⚡</div>
+                    <div class="stat-value" id="rate">0.0</div>
+                    <div class="stat-label">Photos/sec</div>
                 </div>
-                <div class="stat">
-                    <div class="stat-value" id="eta">-</div>
+                <div class="stat-card">
+                    <div class="stat-icon">⏱️</div>
+                    <div class="stat-value" id="eta">--</div>
                     <div class="stat-label">ETA (min)</div>
                 </div>
-                <div class="stat">
-                    <div class="stat-value" id="cost">$0</div>
-                    <div class="stat-label">Cost</div>
+                <div class="stat-card">
+                    <div class="stat-icon">💰</div>
+                    <div class="stat-value" id="cost">$0.00</div>
+                    <div class="stat-label">API Cost</div>
                 </div>
             </div>
-            <div class="buttons">
-                <button class="btn-stop" id="stopBtn" onclick="stopScan()">⏹ Stop Scan</button>
-                <button class="btn-album" id="albumBtn" onclick="openAlbum()">📁 Open Album</button>
+            
+            <div class="actions">
+                <button class="btn btn-danger" id="stopBtn" onclick="stopScan()">
+                    <span>⏹</span> Stop Scan
+                </button>
+                <button class="btn btn-success" id="albumBtn" onclick="openAlbum()">
+                    <span>📂</span> Open Album
+                </button>
             </div>
         </div>
         
         <div class="card">
-            <h3>📋 Matches</h3>
-            <div class="matches" id="matches">
-                <div style="opacity: 0.5; padding: 1rem;">No matches yet...</div>
+            <div class="matches-header">
+                <div class="matches-title">
+                    <span>🎯</span>
+                    <span>Matched Photos</span>
+                    <span class="matches-count" id="matchCount">0</span>
+                </div>
+            </div>
+            
+            <div class="matches-grid" id="matchesGrid">
+                <div class="no-matches">
+                    <div class="no-matches-icon">🔍</div>
+                    <div>No matches found yet</div>
+                    <div style="font-size: 0.85rem; margin-top: 0.5rem;">Matches will appear here as photos are scanned</div>
+                </div>
             </div>
         </div>
     </div>
@@ -526,48 +895,82 @@ DASHBOARD_HTML = """
     <script>
         // Theme based on time
         const hour = new Date().getHours();
-        if (hour >= 7 && hour < 19) {
-            document.body.classList.add('light');
-        }
+        let isDark = !(hour >= 7 && hour < 19);
+        if (!isDark) document.body.classList.add('light');
+        updateThemeIcon();
         
         function toggleTheme() {
+            isDark = !isDark;
             document.body.classList.toggle('light');
+            updateThemeIcon();
+        }
+        
+        function updateThemeIcon() {
+            document.getElementById('themeIcon').textContent = isDark ? '☀️' : '🌙';
         }
         
         function update() {
             fetch('/api/status')
                 .then(r => r.json())
                 .then(data => {
-                    const status = document.getElementById('status');
-                    status.textContent = data.status;
-                    status.className = 'status ' + (data.running ? 'running' : (data.status.includes('COMPLETE') ? 'complete' : 'idle'));
+                    // Status
+                    const dot = document.getElementById('statusDot');
+                    const text = document.getElementById('statusText');
+                    const badge = document.getElementById('modeBadge');
                     
-                    document.getElementById('currentPhoto').textContent = data.current_photo || '';
+                    text.textContent = data.status;
+                    dot.className = 'status-dot ' + (data.running ? 'running' : (data.status.includes('COMPLETE') ? 'complete' : ''));
+                    badge.textContent = data.running ? 'SCANNING' : (data.status.includes('COMPLETE') ? 'COMPLETE' : 'IDLE');
                     
+                    // Search query
+                    if (data.description) {
+                        document.getElementById('searchQuery').style.display = 'flex';
+                        document.getElementById('searchText').textContent = data.description;
+                    }
+                    
+                    // Current file
+                    document.getElementById('currentFile').textContent = data.current_photo || 'Waiting...';
+                    
+                    // Progress
                     const pct = data.total > 0 ? (data.current_index / data.total * 100) : 0;
-                    document.getElementById('progress').style.width = pct + '%';
+                    document.getElementById('progressFill').style.width = pct + '%';
+                    document.getElementById('progressText').textContent = `${data.current_index.toLocaleString()} of ${data.total.toLocaleString()} photos`;
+                    document.getElementById('progressPct').textContent = pct.toFixed(1) + '%';
                     
-                    document.getElementById('scanned').textContent = data.scanned;
-                    document.getElementById('matched').textContent = data.matched;
-                    document.getElementById('added').textContent = data.added;
+                    // Stats
+                    document.getElementById('scanned').textContent = data.scanned.toLocaleString();
+                    document.getElementById('matched').textContent = data.matched.toLocaleString();
+                    document.getElementById('added').textContent = data.added.toLocaleString();
                     document.getElementById('rate').textContent = data.rate.toFixed(1);
-                    document.getElementById('eta').textContent = data.eta_min > 0 ? data.eta_min : '-';
+                    document.getElementById('eta').textContent = data.eta_min > 0 ? data.eta_min : '--';
                     document.getElementById('cost').textContent = '$' + data.cost.toFixed(4);
                     
-                    // Matches
-                    const matchesDiv = document.getElementById('matches');
+                    // Match count badge
+                    document.getElementById('matchCount').textContent = data.matched;
+                    
+                    // Matches grid
+                    const grid = document.getElementById('matchesGrid');
                     if (data.matches && data.matches.length > 0) {
-                        matchesDiv.innerHTML = data.matches.map(m => `
-                            <div class="match">
-                                <img class="match-thumb" src="/api/thumb/${encodeURIComponent(m.path || '')}" 
-                                     onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2280%22 height=%2280%22><rect fill=%22%23333%22 width=%22100%%22 height=%22100%%22/><text x=%2250%%22 y=%2250%%22 fill=%22%23888%22 text-anchor=%22middle%22 dy=%22.3em%22>📸</text></svg>'" />
-                                <div class="match-info">
-                                    <div class="match-name">${m.filename}</div>
-                                    <div class="match-reason">${m.reason}</div>
+                        grid.innerHTML = data.matches.map(m => {
+                            const conf = Math.round(m.confidence * 100);
+                            const confClass = conf >= 85 ? 'high' : 'medium';
+                            return `
+                                <div class="match-card">
+                                    <img class="match-image" 
+                                         src="/api/thumb/${encodeURIComponent(m.path || '')}" 
+                                         onerror="this.style.background='linear-gradient(135deg,#1a1a2e,#16213e)';this.style.display='flex'" 
+                                         alt="${m.filename}" />
+                                    <div class="match-info">
+                                        <div class="match-name">${m.filename}</div>
+                                        <div class="match-reason">${m.reason}</div>
+                                        <div class="match-footer">
+                                            <span class="confidence-badge ${confClass}">${conf}% match</span>
+                                            <span class="match-type">AI Detected</span>
+                                        </div>
+                                    </div>
                                 </div>
-                                <div class="confidence">${Math.round(m.confidence * 100)}%</div>
-                            </div>
-                        `).join('');
+                            `;
+                        }).join('');
                     }
                     
                     // Buttons
@@ -585,7 +988,6 @@ DASHBOARD_HTML = """
             fetch('/api/open-album', { method: 'POST' });
         }
         
-        // Update every 500ms
         setInterval(update, 500);
         update();
     </script>
