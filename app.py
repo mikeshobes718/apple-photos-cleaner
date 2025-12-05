@@ -76,8 +76,9 @@ def get_local_photos(limit=None):
                     return photos
     return photos
 
-def add_to_album(filename):
-    """Add a photo to the AI Matches album by filename."""
+def add_to_album(filename, uuid):
+    """Add a photo to the AI Matches album by UUID or filename."""
+    # Try to match by UUID (more reliable) or filename
     script = f'''
     tell application "Photos"
         try
@@ -86,14 +87,26 @@ def add_to_album(filename):
             set targetAlbum to make new album named "{ALBUM_NAME}"
         end try
         
-        set matchedPhotos to (every media item whose filename is "{filename}")
-        if (count of matchedPhotos) > 0 then
-            add matchedPhotos to targetAlbum
-        end if
+        -- Try by ID first (UUID)
+        try
+            set matchedPhotos to (every media item whose id contains "{uuid}")
+            if (count of matchedPhotos) > 0 then
+                add matchedPhotos to targetAlbum
+                return
+            end if
+        end try
+        
+        -- Try by filename containing UUID
+        try
+            set matchedPhotos to (every media item whose filename contains "{uuid}")
+            if (count of matchedPhotos) > 0 then
+                add matchedPhotos to targetAlbum
+            end if
+        end try
     end tell
     '''
     try:
-        subprocess.run(["osascript", "-e", script], capture_output=True, timeout=10)
+        subprocess.run(["osascript", "-e", script], capture_output=True, timeout=15)
     except:
         pass
 
@@ -562,7 +575,7 @@ class MainWindow(QMainWindow):
         # Search
         self.search = QLineEdit()
         self.search.setPlaceholderText("Describe what photos to find...")
-        self.search.setText("screenshots of banking apps, payment confirmations, Venmo/Zelle/CashApp transactions, credit card statements, and private text message conversations")
+        self.search.setText("Screenshots of banking apps, payment confirmations, Venmo/Zelle/CashApp transactions, credit card statements, and text/message conversations")
         left_layout.addWidget(self.search)
         
         # Controls
@@ -1064,7 +1077,7 @@ class MainWindow(QMainWindow):
             self.matches_list.insertWidget(0, self.make_match_card(data))
             
             # Add to album in real-time
-            add_to_album(data.get('filename', ''))
+            add_to_album(data.get('filename', ''), data.get('uuid', ''))
         else:
             self.match_badge.hide()
     
