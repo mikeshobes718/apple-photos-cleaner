@@ -427,7 +427,13 @@ DASHBOARD_HTML = """
             border-radius: 8px;
             margin-bottom: 0.5rem;
         }
-        .match-icon { font-size: 1.5rem; }
+        .match-thumb {
+            width: 80px;
+            height: 80px;
+            object-fit: cover;
+            border-radius: 6px;
+            background: var(--border);
+        }
         .match-info { flex: 1; }
         .match-name { font-weight: 500; }
         .match-reason { font-size: 0.85rem; opacity: 0.7; }
@@ -553,7 +559,8 @@ DASHBOARD_HTML = """
                     if (data.matches && data.matches.length > 0) {
                         matchesDiv.innerHTML = data.matches.map(m => `
                             <div class="match">
-                                <div class="match-icon">📸</div>
+                                <img class="match-thumb" src="/api/thumb/${encodeURIComponent(m.path || '')}" 
+                                     onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2280%22 height=%2280%22><rect fill=%22%23333%22 width=%22100%%22 height=%22100%%22/><text x=%2250%%22 y=%2250%%22 fill=%22%23888%22 text-anchor=%22middle%22 dy=%22.3em%22>📸</text></svg>'" />
                                 <div class="match-info">
                                     <div class="match-name">${m.filename}</div>
                                     <div class="match-reason">${m.reason}</div>
@@ -621,6 +628,37 @@ def start_dashboard():
     def api_open_album():
         subprocess.run(["open", "-a", "Photos"], capture_output=True)
         return jsonify({"ok": True})
+    
+    @app.route('/api/thumb/<path:filepath>')
+    def api_thumb(filepath):
+        """Serve photo thumbnail."""
+        from flask import send_file
+        from PIL import Image
+        
+        try:
+            # Decode the path
+            import urllib.parse
+            filepath = urllib.parse.unquote(filepath)
+            
+            if not os.path.exists(filepath):
+                return "", 404
+            
+            # Create thumbnail
+            with Image.open(filepath) as img:
+                if img.mode in ('RGBA', 'P', 'LA'):
+                    img = img.convert('RGB')
+                elif img.mode != 'RGB':
+                    img = img.convert('RGB')
+                
+                img.thumbnail((200, 200), Image.Resampling.LANCZOS)
+                
+                buffer = BytesIO()
+                img.save(buffer, format='JPEG', quality=80)
+                buffer.seek(0)
+                
+                return send_file(buffer, mimetype='image/jpeg')
+        except Exception as e:
+            return "", 404
     
     # Run in background thread
     def run():
@@ -791,6 +829,7 @@ def scan_photos(description: str, limit: int = None, dry_run: bool = False, use_
             match_data = {
                 "uuid": photo.uuid,
                 "filename": filename,
+                "path": str(photo.path) if photo.path else "",
                 "confidence": result["confidence"],
                 "reason": result["reason"]
             }
