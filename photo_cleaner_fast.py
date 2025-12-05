@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
-Apple Photos Cleaner - FAST VERSION
-Uses AppleScript instead of osxphotos for instant startup.
-No database loading - gets photos directly from Photos.app.
+Apple Photos Cleaner - Fast Parallel Version
+Uses osxphotos with parallel processing for speed.
 """
 
 import os
@@ -18,15 +17,15 @@ from pathlib import Path
 from io import BytesIO
 from typing import Optional
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# Setup
+# Setup logging
 LOG_DIR = os.path.expanduser("~/Documents/logs")
 os.makedirs(LOG_DIR, exist_ok=True)
 
 def log(msg):
     ts = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
     line = f"[{ts}] {msg}"
-    print(line)
     with open(f"{LOG_DIR}/photo_cleaner.log", "a") as f:
         f.write(line + "\n")
 
@@ -38,6 +37,12 @@ if os.path.exists(ENV_PATH):
             os.environ.setdefault(k, v)
 
 # Imports
+try:
+    import osxphotos
+except ImportError:
+    print("❌ Run: pip install osxphotos")
+    sys.exit(1)
+
 try:
     import openai
 except ImportError:
@@ -63,7 +68,8 @@ DEFAULT_MODEL = "gpt-4o-mini"
 DEFAULT_DESC = "banking, payments, and messaging screenshots (Instagram, WhatsApp, iMessage)"
 MAX_SIZE = 512
 SKIP_EXT = {".mov", ".mp4", ".m4v", ".avi", ".raw", ".cr2", ".nef", ".arw", ".dng", ".3gp"}
-COST_PER_IMG = 0.15 * 1100 / 1_000_000  # gpt-4o-mini
+COST_PER_IMG = 0.15 * 1100 / 1_000_000
+MAX_WORKERS = 4  # Parallel API calls
 
 # Global state
 state = {
@@ -75,106 +81,20 @@ state = {
 state_lock = threading.Lock()
 
 # ============================================================
-# AppleScript helpers (instant, no DB load)
-# ============================================================
-def get_photo_count() -> int:
-    """Get total photo count via AppleScript (with retry)."""
-    script = 'tell application "Photos" to return count of media items'
-    for attempt in range(3):
-        try:
-            result = subprocess.run(["osascript", "-e", script], 
-                                   capture_output=True, text=True, timeout=15)
-            if result.returncode == 0 and result.stdout.strip().isdigit():
-                return int(result.stdout.strip())
-            # Photos might be stuck, try restarting
-            if attempt < 2:
-                log("Photos.app not responding, restarting...")
-                subprocess.run(["killall", "Photos"], capture_output=True)
-                time.sleep(2)
-                subprocess.run(["open", "-a", "Photos"], capture_output=True)
-                time.sleep(5)
-        except subprocess.TimeoutExpired:
-            if attempt < 2:
-                log("Photos.app timed out, restarting...")
-                subprocess.run(["killall", "Photos"], capture_output=True)
-                time.sleep(2)
-                subprocess.run(["open", "-a", "Photos"], capture_output=True)
-                time.sleep(5)
-        except:
-            pass
-    return 0
-
-def get_photo_info(index: int) -> dict:
-    """Get info for photo at index (1-based) via AppleScript."""
-    script = f'''
-    tell application "Photos"
-        set p to media item {index}
-        set photoId to id of p
-        set photoName to filename of p
-        set photoDate to date of p
-        return photoId & "|" & photoName & "|" & (photoDate as string)
-    end tell
-    '''
-    try:
-        result = subprocess.run(["osascript", "-e", script],
-                               capture_output=True, text=True, timeout=10)
-        if result.returncode == 0:
-            parts = result.stdout.strip().split("|")
-            return {"id": parts[0], "name": parts[1], "date": parts[2]} if len(parts) >= 3 else None
-    except:
-        pass
-    return None
-
-def export_photo(photo_id: str, dest_dir: str) -> Optional[str]:
-    """Export photo to dest_dir, return path."""
-    script = f'''
-    tell application "Photos"
-        set p to media item id "{photo_id}"
-        set exportPath to POSIX file "{dest_dir}"
-        export {{p}} to exportPath
-    end tell
-    '''
-    try:
-        result = subprocess.run(["osascript", "-e", script],
-                               capture_output=True, text=True, timeout=30)
-        if result.returncode == 0:
-            # Find exported file
-            for f in Path(dest_dir).iterdir():
-                return str(f)
-    except:
-        pass
-    return None
-
-def add_to_album(photo_id: str, album_name: str = "🤖 AI Matches - To Delete") -> bool:
-    """Add photo to album."""
-    script = f'''
-    tell application "Photos"
-        set albumName to "{album_name}"
-        try
-            set targetAlbum to album albumName
-        on error
-            set targetAlbum to make new album named albumName
-        end try
-        add {{media item id "{photo_id}"}} to targetAlbum
-        return "ok"
-    end tell
-    '''
-    try:
-        result = subprocess.run(["osascript", "-e", script],
-                               capture_output=True, text=True, timeout=30)
-        return result.returncode == 0
-    except:
-        return False
-
-# ============================================================
 # Image processing
 # ============================================================
-def encode_image(filepath: str) -> tuple[Optional[str], str]:
-    """Encode image to base64."""
+def encode_image(photo) -> tuple[Optional[str], str, str]:
+    """Encode photo to base64. Returns (data, media_type, filename)."""
+    filename = photo.original_filename or "unknown"
     try:
-        ext = Path(filepath).suffix.lower()
+        filepath = Path(photo.path) if photo.path else None
+        
+        if not filepath or not filepath.exists():
+            return None, "no_path", filename
+        
+        ext = filepath.suffix.lower()
         if ext in SKIP_EXT:
-            return None, f"skip_{ext}"
+            return None, f"skip_{ext}", filename
         
         if PIL_OK:
             with Image.open(filepath) as img:
@@ -184,16 +104,14 @@ def encode_image(filepath: str) -> tuple[Optional[str], str]:
                 buf = BytesIO()
                 img.save(buf, format='JPEG', quality=80)
                 buf.seek(0)
-                return base64.b64encode(buf.read()).decode(), "image/jpeg"
-        else:
-            with open(filepath, "rb") as f:
-                return base64.b64encode(f.read()).decode(), "image/jpeg"
+                return base64.b64encode(buf.read()).decode(), "image/jpeg", filename
+        
+        with open(filepath, "rb") as f:
+            return base64.b64encode(f.read()).decode(), "image/jpeg", filename
+            
     except Exception as e:
-        return None, f"error_{e}"
+        return None, f"error", filename
 
-# ============================================================
-# AI Analysis
-# ============================================================
 def analyze(client, model: str, image_data: str, description: str) -> dict:
     """Analyze image with OpenAI."""
     try:
@@ -216,12 +134,31 @@ def analyze(client, model: str, image_data: str, description: str) -> dict:
     except Exception as e:
         return {"match": False, "confidence": 0, "reason": str(e)[:50]}
 
+def add_to_album(photo_uuid: str, album_name: str = "🤖 AI Matches - To Delete") -> bool:
+    """Add photo to album."""
+    script = f'''
+    tell application "Photos"
+        try
+            set targetAlbum to album "{album_name}"
+        on error
+            set targetAlbum to make new album named "{album_name}"
+        end try
+        add {{media item id "{photo_uuid}"}} to targetAlbum
+    end tell
+    '''
+    try:
+        result = subprocess.run(["osascript", "-e", script],
+                               capture_output=True, text=True, timeout=30)
+        return result.returncode == 0
+    except:
+        return False
+
 # ============================================================
-# Main scanner
+# Main scanner with parallel processing
 # ============================================================
 def scan(description: str, limit: Optional[int] = None, dry_run: bool = False, 
          realtime: bool = True, model: str = DEFAULT_MODEL):
-    """Scan photos using AppleScript (instant start)."""
+    """Scan photos with parallel processing."""
     global state
     
     if not os.getenv("OPENAI_API_KEY"):
@@ -232,7 +169,7 @@ def scan(description: str, limit: Optional[int] = None, dry_run: bool = False,
     
     with state_lock:
         state.update({
-            "status": "Getting photo count...",
+            "status": "Loading Photos library...",
             "scanned": 0, "matched": 0, "deleted": 0, "skipped": 0,
             "total": 0, "cost": 0.0, "errors": 0,
             "current_photo": None, "history": [], "matches": [],
@@ -240,94 +177,100 @@ def scan(description: str, limit: Optional[int] = None, dry_run: bool = False,
             "description": description, "model": model
         })
     
-    # Get count instantly
-    total = get_photo_count()
-    actual_total = min(limit, total) if limit else total
+    # Load photos
+    print("📚 Loading Photos library...")
+    start = time.time()
+    db = osxphotos.PhotosDB()
+    photos = list(db.photos())
+    load_time = time.time() - start
+    print(f"   Loaded {len(photos):,} photos in {load_time:.1f}s")
+    
+    if limit:
+        photos = photos[:limit]
+    total = len(photos)
     
     with state_lock:
-        state["total"] = actual_total
+        state["total"] = total
         state["status"] = "Scanning"
-        state["history"].append(f"📚 Found {total:,} photos, scanning {actual_total:,}")
+        state["history"].append(f"📚 Loaded {len(db.photos()):,} photos in {load_time:.0f}s, scanning {total:,}")
     
-    log(f"START | desc='{description}' | model={model} | limit={actual_total}/{total}")
-    print(f"\n🔍 Scanning {actual_total:,} photos for: \"{description}\"")
-    print(f"   Model: {model} | Dry run: {dry_run}\n")
+    log(f"START | desc='{description}' | model={model} | total={total}")
+    print(f"\n🔍 Scanning {total:,} photos for: \"{description}\"")
+    print(f"   Model: {model} | Workers: {MAX_WORKERS} | Dry run: {dry_run}\n")
     
-    import tempfile
-    
-    for i in range(1, actual_total + 1):
+    def process_photo(photo):
+        """Process single photo (runs in thread)."""
         if state["stop_requested"]:
-            log("STOPPED by user")
-            break
+            return None
         
-        # Get photo info
-        info = get_photo_info(i)
-        if not info:
-            with state_lock:
-                state["errors"] += 1
-                state["scanned"] += 1
-            continue
-        
-        filename = info["name"]
-        photo_id = info["id"]
-        
-        # Export and encode
-        with tempfile.TemporaryDirectory() as tmpdir:
-            filepath = export_photo(photo_id, tmpdir)
-            if not filepath:
-                with state_lock:
-                    state["errors"] += 1
-                    state["scanned"] += 1
-                continue
-            
-            img_data, result_type = encode_image(filepath)
+        img_data, result_type, filename = encode_image(photo)
         
         if not img_data:
-            with state_lock:
-                if result_type.startswith("skip_"):
-                    state["skipped"] += 1
-                else:
-                    state["errors"] += 1
-                state["scanned"] += 1
-                state["history"].append(f"   ⏭️ {filename} ({result_type})")
-            continue
+            return {"filename": filename, "skipped": result_type.startswith("skip_"), "error": not result_type.startswith("skip_")}
         
-        # Analyze
         result = analyze(client, model, img_data, description)
+        is_match = result.get("match", False) and result.get("confidence", 0) >= 0.7
         
-        with state_lock:
-            state["scanned"] += 1
-            state["cost"] += COST_PER_IMG
-            state["status"] = f"Scanning ({i}/{actual_total})"
+        return {
+            "filename": filename,
+            "uuid": photo.uuid,
+            "img_data": img_data[:50000],
+            "result": result,
+            "is_match": is_match
+        }
+    
+    # Process in parallel
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        futures = {executor.submit(process_photo, p): p for p in photos}
+        
+        for future in as_completed(futures):
+            if state["stop_requested"]:
+                break
             
-            is_match = result.get("match", False) and result.get("confidence", 0) >= 0.7
-            
-            state["current_photo"] = {
-                "name": filename,
-                "data": img_data[:50000],
-                "reason": result.get("reason", ""),
-                "confidence": result.get("confidence", 0),
-                "is_match": is_match
-            }
-            
-            if is_match:
-                state["matched"] += 1
-                state["matches"].append({"id": photo_id, "filename": filename})
-                state["history"].append(f"⚡ MATCH: {filename} ({result.get('confidence', 0):.0%})")
+            try:
+                result = future.result(timeout=60)
+                if result is None:
+                    continue
                 
-                log(f"MATCH | {filename}")
-                print(f"   ⚡ MATCH: {filename} ({result.get('confidence', 0):.0%})")
-                
-                if realtime and not dry_run:
-                    if add_to_album(photo_id):
-                        state["deleted"] += 1
-                        log(f"ADDED TO ALBUM | {filename}")
-                        print(f"      📁 Added to album")
-            else:
-                state["history"].append(f"   {filename}")
-            
-            if len(state["history"]) > 100:
-                state["history"] = state["history"][-50:]
+                with state_lock:
+                    state["scanned"] += 1
+                    state["cost"] += COST_PER_IMG
+                    state["status"] = f"Scanning ({state['scanned']}/{total})"
+                    
+                    if result.get("skipped"):
+                        state["skipped"] += 1
+                        state["history"].append(f"   ⏭️ {result['filename']}")
+                    elif result.get("error"):
+                        state["errors"] += 1
+                    elif result.get("is_match"):
+                        state["matched"] += 1
+                        state["matches"].append({"uuid": result["uuid"], "filename": result["filename"]})
+                        state["history"].append(f"⚡ MATCH: {result['filename']} ({result['result'].get('confidence', 0):.0%})")
+                        log(f"MATCH | {result['filename']}")
+                        print(f"   ⚡ MATCH: {result['filename']} ({result['result'].get('confidence', 0):.0%})")
+                        
+                        if realtime and not dry_run:
+                            if add_to_album(result["uuid"]):
+                                state["deleted"] += 1
+                                print(f"      📁 Added to album")
+                    else:
+                        state["history"].append(f"   {result['filename']}")
+                    
+                    if result.get("img_data"):
+                        state["current_photo"] = {
+                            "name": result["filename"],
+                            "data": result["img_data"],
+                            "reason": result.get("result", {}).get("reason", ""),
+                            "confidence": result.get("result", {}).get("confidence", 0),
+                            "is_match": result.get("is_match", False)
+                        }
+                    
+                    if len(state["history"]) > 100:
+                        state["history"] = state["history"][-50:]
+                        
+            except Exception as e:
+                with state_lock:
+                    state["errors"] += 1
     
     with state_lock:
         state["status"] = "Complete" if not state["stop_requested"] else "Stopped"
@@ -345,7 +288,6 @@ def scan(description: str, limit: Optional[int] = None, dry_run: bool = False,
     
     if state["deleted"] > 0:
         print("📁 Review in Photos → Albums → '🤖 AI Matches - To Delete'")
-        subprocess.run(["osascript", "-e", 'tell application "Photos" to activate'], capture_output=True)
 
 # ============================================================
 # Dashboard
@@ -377,7 +319,7 @@ h1 { margin-bottom: 10px; }
 </head>
 <body>
 <div class="container">
-<h1>🧹 Apple Photos Cleaner (Fast)</h1>
+<h1>🧹 Apple Photos Cleaner</h1>
 <div class="subtitle" id="subtitle">Starting...</div>
 <div class="stats">
   <div class="stat"><div class="stat-label">Status</div><div class="stat-value" id="status">-</div></div>
@@ -428,13 +370,17 @@ function update() {
     log.scrollTop = log.scrollHeight;
   });
 }
-setInterval(update, 1000);
+setInterval(update, 500);
 update();
 </script>
 </body></html>'''
 
 def create_app(desc, limit, dry_run, realtime, model):
     app = Flask(__name__)
+    
+    import logging
+    log = logging.getLogger('werkzeug')
+    log.setLevel(logging.ERROR)
     
     @app.route('/')
     def index():
@@ -478,8 +424,7 @@ def find_port():
 # ============================================================
 def interactive():
     print("\n" + "="*50)
-    print("  🧹 Apple Photos Cleaner (FAST)")
-    print("  No database loading - instant start!")
+    print("  🧹 Apple Photos Cleaner")
     print("="*50 + "\n")
     
     desc = input(f"1. What to find [{DEFAULT_DESC[:50]}...]:\n   ").strip() or DEFAULT_DESC
@@ -506,7 +451,7 @@ def interactive():
 # Main
 # ============================================================
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Fast Apple Photos cleaner (no DB load)")
+    parser = argparse.ArgumentParser(description="Fast Apple Photos cleaner with parallel processing")
     parser.add_argument("description", nargs="?")
     parser.add_argument("--limit", type=int, default=None, help="Limit photos (default: all)")
     parser.add_argument("--dry-run", action="store_true")
@@ -525,4 +470,3 @@ if __name__ == "__main__":
         app.run(host='localhost', port=port, threaded=True)
     else:
         scan(args.description, args.limit, args.dry_run, not args.no_realtime)
-
