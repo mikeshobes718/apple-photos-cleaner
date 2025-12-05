@@ -219,7 +219,7 @@ def analyze(client, model: str, image_data: str, description: str) -> dict:
 # ============================================================
 # Main scanner
 # ============================================================
-def scan(description: str, limit: int = 100, dry_run: bool = False, 
+def scan(description: str, limit: Optional[int] = None, dry_run: bool = False, 
          realtime: bool = True, model: str = DEFAULT_MODEL):
     """Scan photos using AppleScript (instant start)."""
     global state
@@ -484,8 +484,8 @@ def interactive():
     
     desc = input(f"1. What to find [{DEFAULT_DESC[:50]}...]:\n   ").strip() or DEFAULT_DESC
     
-    lim = input("\n2. How many photos to scan [100]: ").strip()
-    limit = int(lim) if lim.isdigit() else 100
+    lim = input("\n2. How many photos to scan [all]: ").strip().lower()
+    limit = None if lim in ("", "all") else (int(lim) if lim.isdigit() else None)
     
     dashboard = input("\n3. Open dashboard? (Y/n) [Y]: ").strip().lower() != "n"
     dry_run = input("\n4. Dry run? (y/N) [N]: ").strip().lower() == "y"
@@ -508,7 +508,7 @@ def interactive():
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Fast Apple Photos cleaner (no DB load)")
     parser.add_argument("description", nargs="?")
-    parser.add_argument("--limit", type=int, default=100)
+    parser.add_argument("--limit", type=int, default=None, help="Limit photos (default: all)")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--dashboard", action="store_true")
     parser.add_argument("--no-realtime", action="store_true")
