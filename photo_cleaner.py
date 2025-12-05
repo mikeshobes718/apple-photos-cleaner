@@ -392,9 +392,15 @@ def run_interactive():
     while not description:
         description = input("\n3. Describe photos to delete (e.g., 'bank statements'): ").strip()
 
-    # 4) Limit (default 50)
-    lim_raw = input("4. Limit photos to scan [50]: ").strip()
-    limit = int(lim_raw) if lim_raw.isdigit() else 50
+    # 4) Limit (default 50; enter 'all' or blank for no limit)
+    lim_raw = input("4. Limit photos to scan [50 | all]: ").strip().lower()
+    if lim_raw in ("", "all"):
+        limit = None  # no limit
+    elif lim_raw.isdigit():
+        limit = int(lim_raw)
+    else:
+        print("   Invalid limit, defaulting to 50")
+        limit = 50
 
     # 5) Visual Dashboard (default Y - note: minimal CLI only)
     vis_raw = input("5. Visual Dashboard? (Y/n) [Y]: ").strip().lower()

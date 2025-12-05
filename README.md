@@ -60,6 +60,13 @@ The script defaults to an easy-to-use interactive mode.
 python3 photo_cleaner.py
 ```
 
+Interactive defaults:
+- Backend: OpenAI
+- Model: gpt-5-mini
+- Limit: 50 (enter `all` or leave blank for no limit)
+- Visual dashboard: defaults to Yes
+- Dry run: defaults to Yes
+
 **Interactive Mode (Best for starting out):**
 ```bash
 python3.12 scripts/photo_cleaner_interactive.py
