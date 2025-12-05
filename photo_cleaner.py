@@ -79,8 +79,9 @@ PRICE_PER_MILLION = {
 }
 TOKENS_PER_IMAGE = 270
 MAX_IMAGE_SIZE = 512  # Resize images to max 512px for speed
-MAX_WORKERS = 8  # Concurrent API calls
+MAX_WORKERS = 4  # Concurrent API calls (reduced to prevent rate limiting)
 MAX_RETRIES = 2
+FUTURE_TIMEOUT = 60  # Timeout for each photo processing
 
 # Global state for dashboard
 scan_state = {
@@ -902,22 +903,38 @@ class PhotoCleaner:
             
             batch = photos[batch_start:batch_start + batch_size]
             
-            with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-                futures = {executor.submit(process_photo, (batch_start + i, p)): i for i, p in enumerate(batch)}
-                
-                for future in as_completed(futures):
-                    if scan_state["stop_requested"]:
-                        # Cancel remaining futures
-                        for f in futures:
-                            f.cancel()
-                        break
+            try:
+                with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+                    futures = {executor.submit(process_photo, (batch_start + i, p)): i for i, p in enumerate(batch)}
                     
                     try:
-                        result = future.result(timeout=60)
-                        if result:
-                            to_delete.append(result)
-                    except Exception as e:
-                        log_line(f"ERROR in future: {e}")
+                        for future in as_completed(futures, timeout=FUTURE_TIMEOUT * 2):
+                            if scan_state["stop_requested"]:
+                                # Cancel remaining futures
+                                for f in futures:
+                                    f.cancel()
+                                break
+                            
+                            try:
+                                result = future.result(timeout=FUTURE_TIMEOUT)
+                                if result:
+                                    to_delete.append(result)
+                            except TimeoutError:
+                                log_line("TIMEOUT: Photo processing took too long, skipping")
+                                with state_lock:
+                                    scan_state["stats"]["errors"] += 1
+                            except Exception as e:
+                                log_line(f"ERROR in future: {e}")
+                                with state_lock:
+                                    scan_state["stats"]["errors"] += 1
+                    except TimeoutError:
+                        log_line("BATCH TIMEOUT: Moving to next batch")
+                        with state_lock:
+                            scan_state["stats"]["errors"] += len(batch)
+            except Exception as e:
+                log_line(f"BATCH ERROR: {e}")
+                with state_lock:
+                    scan_state["stats"]["errors"] += 1
 
         # Check if stopped
         was_stopped = scan_state["stop_requested"]
