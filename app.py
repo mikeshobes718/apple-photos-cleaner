@@ -287,29 +287,47 @@ class MainWindow(QMainWindow):
     
     def setup_menu(self):
         menubar = self.menuBar()
+        menubar.setNativeMenuBar(True)  # Use native macOS menu bar
         
-        # File menu
-        file_menu = menubar.addMenu("File")
+        # Photo Cleaner Pro menu (app menu)
+        app_menu = menubar.addMenu("Photo Cleaner Pro")
         
         restart = QAction("Restart App", self)
-        restart.setShortcut("Ctrl+R")
+        restart.setShortcut("Ctrl+R")  # Shows as ⌘R on macOS
         restart.triggered.connect(self.restart_app)
-        file_menu.addAction(restart)
-        
-        file_menu.addSeparator()
+        app_menu.addAction(restart)
         
         clear = QAction("Clear Results", self)
         clear.setShortcut("Ctrl+Shift+C")
         clear.triggered.connect(self.clear_results)
-        file_menu.addAction(clear)
+        app_menu.addAction(clear)
         
-        # View menu
-        view_menu = menubar.addMenu("View")
+        app_menu.addSeparator()
         
         toggle_theme = QAction("Toggle Dark/Light Mode", self)
         toggle_theme.setShortcut("Ctrl+T")
         toggle_theme.triggered.connect(self.toggle_theme)
-        view_menu.addAction(toggle_theme)
+        app_menu.addAction(toggle_theme)
+        
+        # File menu
+        file_menu = menubar.addMenu("File")
+        
+        restart2 = QAction("Restart App", self)
+        restart2.setShortcut("Ctrl+R")
+        restart2.triggered.connect(self.restart_app)
+        file_menu.addAction(restart2)
+        
+        clear2 = QAction("Clear Results", self)
+        clear2.triggered.connect(self.clear_results)
+        file_menu.addAction(clear2)
+        
+        # View menu
+        view_menu = menubar.addMenu("View")
+        
+        toggle2 = QAction("Toggle Dark/Light Mode", self)
+        toggle2.setShortcut("Ctrl+T")
+        toggle2.triggered.connect(self.toggle_theme)
+        view_menu.addAction(toggle2)
     
     def restart_app(self):
         if self.scanner and self.scanner.isRunning():
