@@ -495,6 +495,10 @@ class MainWindow(QMainWindow):
         header.setContentsMargins(20, 12, 20, 12)
         
         # Logo/Title
+        logo = QLabel("✨")
+        logo.setStyleSheet("font-size: 20px;")
+        header.addWidget(logo)
+        
         title = QLabel("Photo Cleaner Pro")
         title.setStyleSheet("font-size: 15px; font-weight: 600;")
         header.addWidget(title)
@@ -665,7 +669,8 @@ class MainWindow(QMainWindow):
         
         # ─────────── RIGHT: Sidebar ───────────
         self.sidebar = QFrame()
-        self.sidebar.setFixedWidth(280)
+        self.sidebar.setMinimumWidth(300)
+        self.sidebar.setMaximumWidth(400)
         sb_layout = QVBoxLayout(self.sidebar)
         sb_layout.setContentsMargins(16, 20, 16, 20)
         sb_layout.setSpacing(12)
@@ -766,40 +771,49 @@ class MainWindow(QMainWindow):
         """)
         
         layout = QHBoxLayout(card)
-        layout.setContentsMargins(10, 8, 10, 8)
+        layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(10)
         
         # Thumb
         thumb = QLabel()
-        thumb.setFixedSize(40, 40)
-        thumb.setStyleSheet(f"border-radius: 6px; background: {t['surface2']}; border: none;")
+        thumb.setFixedSize(44, 44)
+        thumb.setStyleSheet(f"border-radius: 8px; background: {t['surface2']}; border: none;")
         try:
             with Image.open(data['path']) as img:
                 if img.mode != 'RGB':
                     img = img.convert('RGB')
-                img.thumbnail((40, 40))
+                img.thumbnail((44, 44))
                 buf = BytesIO()
                 img.save(buf, format='JPEG')
                 qimg = QImage.fromData(buf.getvalue())
-                thumb.setPixmap(QPixmap.fromImage(qimg).scaled(40, 40, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation))
+                thumb.setPixmap(QPixmap.fromImage(qimg).scaled(44, 44, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation))
         except:
             thumb.setText("·")
         layout.addWidget(thumb)
         
-        # Info
+        # Info - takes remaining space
         info = QVBoxLayout()
-        info.setSpacing(1)
-        name = QLabel(data.get('filename', '')[:20])
-        name.setStyleSheet(f"font-size: 11px; font-weight: 600; color: {t['text']}; border: none;")
+        info.setSpacing(2)
+        
+        # Truncate filename smartly
+        filename = data.get('filename', '')
+        if len(filename) > 28:
+            filename = filename[:12] + "..." + filename[-12:]
+        name = QLabel(filename)
+        name.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {t['text']}; border: none;")
         info.addWidget(name)
-        reason = QLabel(data.get('reason', '')[:30])
+        
+        reason = QLabel(data.get('reason', '')[:40])
         reason.setStyleSheet(f"font-size: 10px; color: {t['text3']}; border: none;")
+        reason.setWordWrap(True)
         info.addWidget(reason)
         layout.addLayout(info, 1)
         
-        # Badge
+        # Badge - fixed width so it doesn't get cut off
         badge = QLabel(f"{conf}%")
-        badge.setStyleSheet(f"background: {t['green']}; color: white; font-size: 10px; font-weight: 700; padding: 3px 7px; border-radius: 6px; border: none;")
+        badge.setFixedWidth(45)
+        badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        badge.setStyleSheet(f"background: {t['green']}; color: white; font-size: 11px; font-weight: 700; padding: 4px 0; border-radius: 8px; border: none;")
         layout.addWidget(badge)
         
         return card
@@ -940,11 +954,12 @@ class MainWindow(QMainWindow):
                     if lbl.objectName() != "value":
                         lbl.setStyleSheet(f"font-size: {tiny_size}px; color: {t['text3']}; letter-spacing: 1px;")
         
-        # Sidebar
-        sidebar_width = int(280 * scale)
-        sidebar_width = max(220, min(sidebar_width, 350))
+        # Sidebar - use min/max instead of fixed
+        sidebar_min = int(280 * scale)
+        sidebar_max = int(380 * scale)
         if hasattr(self, 'sidebar'):
-            self.sidebar.setFixedWidth(sidebar_width)
+            self.sidebar.setMinimumWidth(max(260, sidebar_min))
+            self.sidebar.setMaximumWidth(max(320, sidebar_max))
         
         # Match count badge
         if hasattr(self, 'match_count'):
