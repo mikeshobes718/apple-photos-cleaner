@@ -378,12 +378,21 @@ async function fetchStats() {
       badge.style.display = d.current_photo.is_match ? 'block' : 'none';
     }
     
-    // Show "Delete Now" button if there are matches and not in dry run
+    // Show "Delete Now" button if there are matches and not in dry run or deleting
     const deleteBtn = document.getElementById('delete-now-btn');
     const hasDryRun = (d.meta || '').includes('DRY RUN');
-    if ((d.matched || 0) > 0 && !hasDryRun && d.deleted === 0) {
+    const pendingDeletes = (d.matched || 0) - (d.deleted || 0);
+    
+    if (d.deleting) {
       deleteBtn.style.display = 'inline-block';
-      deleteBtn.textContent = `Delete ${d.matched} Now`;
+      deleteBtn.textContent = `Deleting... (${d.deleted}/${d.matched})`;
+      deleteBtn.disabled = true;
+      deleteBtn.style.opacity = '0.7';
+    } else if (pendingDeletes > 0 && !hasDryRun) {
+      deleteBtn.style.display = 'inline-block';
+      deleteBtn.textContent = `Delete ${pendingDeletes} Now`;
+      deleteBtn.disabled = false;
+      deleteBtn.style.opacity = '1';
     } else {
       deleteBtn.style.display = 'none';
     }
@@ -399,7 +408,8 @@ async function stopScan() {
     const action = confirm(
       `Scan stopped. Found ${data.matched} matches so far.\n\n` +
       `Click OK to DELETE these ${data.matched} photos now.\n` +
-      `Click Cancel to keep them.`
+      `Click Cancel to keep them.\n\n` +
+      `(Deletion progress will show in the activity log)`
     );
     
     if (action) {
@@ -412,7 +422,7 @@ async function deleteNow() {
   const matched = parseInt(document.getElementById('matched').textContent) || 0;
   if (matched === 0) return;
   
-  const action = confirm(`Delete ${matched} matched photos now?`);
+  const action = confirm(`Delete ${matched} matched photos now?\n\nPhotos will be deleted one by one.\nWatch the progress in the activity log.`);
   if (action) {
     await performDelete();
   }
@@ -420,16 +430,20 @@ async function deleteNow() {
 
 async function performDelete() {
   document.getElementById('status').textContent = 'Deleting...';
+  document.getElementById('delete-now-btn').style.display = 'none';
+  
   const delRes = await fetch('/delete-matches', { method: 'POST' });
   const delData = await delRes.json();
+  
   if (delData.dry_run) {
     alert('Dry run mode - no photos were deleted.');
-  } else {
-    alert(`Deleted ${delData.deleted} photos.`);
-    document.getElementById('deleted').textContent = delData.deleted;
+    document.getElementById('status').textContent = 'Complete';
+  } else if (delData.started) {
+    // Deletion started in background - UI will update via fetchStats
+    console.log(`Started deleting ${delData.total} photos...`);
+  } else if (delData.message) {
+    console.log(delData.message);
   }
-  document.getElementById('status').textContent = 'Complete';
-  document.getElementById('delete-now-btn').style.display = 'none';
 }
 
 setInterval(fetchStats, 500);
@@ -994,6 +1008,7 @@ def start_dashboard(cleaner: PhotoCleaner, description: str, limit: Optional[int
             remaining = total - scanned
             eta = remaining / speed if speed > 0 else 0
             progress = f"{(scanned / total * 100):.0f}%" if total > 0 else "0%"
+            is_deleting = scan_state.get("deleting", False)
             
             return jsonify({
                 "status": scan_state["status"],
@@ -1009,6 +1024,7 @@ def start_dashboard(cleaner: PhotoCleaner, description: str, limit: Optional[int
                 "speed": f"{speed:.1f}/s" if speed > 0 else "-",
                 "eta": format_time(eta) if eta > 0 else "-",
                 "progress": progress,
+                "deleting": is_deleting,
             })
 
     @app.route('/stop', methods=['POST'])
@@ -1021,23 +1037,50 @@ def start_dashboard(cleaner: PhotoCleaner, description: str, limit: Optional[int
 
     @app.route('/delete-matches', methods=['POST'])
     def delete_matches():
-        """Delete all matches found so far."""
+        """Delete all matches found so far (runs in background)."""
         with state_lock:
             matches = scan_state["matches"].copy()
             dry_run_mode = scan_state["meta"] and "DRY RUN" in scan_state["meta"]
+            already_deleting = scan_state.get("deleting", False)
         
         if not matches or dry_run_mode:
-            return jsonify({"deleted": 0, "dry_run": dry_run_mode})
+            return jsonify({"deleted": 0, "dry_run": dry_run_mode, "started": False})
         
-        uuids = [m["uuid"] for m in matches]
-        deleted = cleaner.delete_photos(uuids)
+        if already_deleting:
+            return jsonify({"deleted": 0, "dry_run": False, "started": False, "message": "Already deleting"})
         
-        with state_lock:
-            scan_state["stats"]["deleted"] = deleted
-            scan_state["history"].append(f"🗑️ Deleted {deleted} photos after stop")
+        # Start deletion in background thread
+        def delete_in_background():
+            with state_lock:
+                scan_state["deleting"] = True
+                scan_state["status"] = "Deleting..."
+                scan_state["history"].append(f"🗑️ Starting deletion of {len(matches)} photos...")
+            
+            deleted_count = 0
+            for i, match in enumerate(matches):
+                try:
+                    result = cleaner.delete_photos([match["uuid"]])
+                    if result > 0:
+                        deleted_count += 1
+                        with state_lock:
+                            scan_state["stats"]["deleted"] = deleted_count
+                            scan_state["history"].append(f"   ✓ Deleted: {match['filename']} ({deleted_count}/{len(matches)})")
+                except Exception as e:
+                    with state_lock:
+                        scan_state["history"].append(f"   ⚠️ Failed: {match['filename']}")
+            
+            with state_lock:
+                scan_state["deleting"] = False
+                scan_state["status"] = "Complete"
+                scan_state["history"].append(f"✅ Finished: Deleted {deleted_count}/{len(matches)} photos")
+                scan_state["matches"] = []  # Clear matches after deletion
+            
+            log_line(f"DELETED | count={deleted_count}")
         
-        log_line(f"DELETED after stop | count={deleted}")
-        return jsonify({"deleted": deleted})
+        thread = threading.Thread(target=delete_in_background, daemon=True)
+        thread.start()
+        
+        return jsonify({"deleted": 0, "dry_run": False, "started": True, "total": len(matches)})
 
     # Find free port
     port = find_free_port()
