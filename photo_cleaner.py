@@ -20,9 +20,32 @@ from pathlib import Path
 from typing import Optional
 from dotenv import load_dotenv
 
-# Load secrets from shared Keys folder
+# Load secrets from shared Keys folder (supports JSON or .env syntax)
 ENV_PATH = "/Users/mike/Documents/Keys/.env"
-load_dotenv(ENV_PATH)
+
+def load_env_file(path: str) -> None:
+    """Load environment variables from JSON or .env file."""
+    try:
+        if not os.path.exists(path):
+            return
+        with open(path, "r", encoding="utf-8") as f:
+            content = f.read().strip()
+        if not content:
+            return
+        # Try JSON first
+        if content.startswith("{"):
+            data = json.loads(content)
+            if isinstance(data, dict):
+                for k, v in data.items():
+                    if isinstance(k, str) and isinstance(v, str):
+                        os.environ.setdefault(k, v)
+                return
+        # Fallback to dotenv format
+        load_dotenv(path)
+    except Exception as e:
+        print(f"⚠️  Could not load env file {path}: {e}")
+
+load_env_file(ENV_PATH)
 
 try:
     import osxphotos

@@ -32,12 +32,13 @@ Automatically find and delete photos from Apple Photos using AI.
     pip install -r requirements.txt
     ```
 
-3.  **Create a `.env` file for your API Key**:
-    Create a file named `.env` in the project directory and add your OpenAI API key to it. The script will load this automatically.
+3.  **Create/update your shared Keys file (JSON supported)**:
+    The script loads secrets from `/Users/mike/Documents/Keys/.env`. It can be JSON or dotenv. Recommended JSON format:
 
-    ```
-    # .env
-    OPENAI_API_KEY="sk-YOUR_API_KEY_HERE"
+    ```json
+    {
+      "OPENAI_API_KEY": "sk-YOUR_API_KEY_HERE"
+    }
     ```
 
 ### (Optional) Local AI with Ollama
