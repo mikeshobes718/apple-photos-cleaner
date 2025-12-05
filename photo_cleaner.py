@@ -72,8 +72,16 @@ except ImportError:
 try:
     from PIL import Image
     PIL_AVAILABLE = True
+    # Register HEIC support
+    try:
+        from pillow_heif import register_heif_opener
+        register_heif_opener()
+        HEIC_AVAILABLE = True
+    except ImportError:
+        HEIC_AVAILABLE = False
 except ImportError:
     PIL_AVAILABLE = False
+    HEIC_AVAILABLE = False
 
 # ============================================================
 # Configuration
@@ -82,7 +90,8 @@ DEFAULT_MODEL = "gpt-4o-mini"
 DEFAULT_DESCRIPTION = "banking, payments, and messaging screenshots (Instagram, WhatsApp, iMessage)"
 MAX_IMAGE_SIZE = 512
 CONFIDENCE_THRESHOLD = 0.7
-SKIP_EXTENSIONS = {".mov", ".mp4", ".m4v", ".avi", ".heic", ".raw", ".cr2", ".nef", ".arw"}
+# Only skip videos and RAW files (HEIC is handled by PIL)
+SKIP_EXTENSIONS = {".mov", ".mp4", ".m4v", ".avi", ".raw", ".cr2", ".nef", ".arw", ".dng", ".3gp", ".mkv", ".webm"}
 
 # Cost per million tokens (approximate)
 COST_PER_MILLION = {"gpt-4o": 2.50, "gpt-4o-mini": 0.15}
@@ -96,6 +105,7 @@ state = {
     "scanned": 0,
     "matched": 0,
     "deleted": 0,
+    "skipped": 0,
     "total": 0,
     "cost": 0.0,
     "errors": 0,
@@ -317,6 +327,10 @@ HTML_TEMPLATE = """
         <div class="stat-value cost" id="cost">$0.00</div>
       </div>
       <div class="stat">
+        <div class="stat-label">Skipped</div>
+        <div class="stat-value" id="skipped">0</div>
+      </div>
+      <div class="stat">
         <div class="stat-label">Errors</div>
         <div class="stat-value" id="errors">0</div>
       </div>
@@ -365,6 +379,7 @@ HTML_TEMPLATE = """
       document.getElementById('matched').textContent = d.matched || 0;
       document.getElementById('deleted').textContent = d.deleted || 0;
       document.getElementById('cost').textContent = '$' + (d.cost || 0).toFixed(4);
+      document.getElementById('skipped').textContent = d.skipped || 0;
       document.getElementById('errors').textContent = d.errors || 0;
       
       // Subtitle
@@ -498,7 +513,7 @@ class PhotoCleaner:
         return photos
     
     def encode_photo(self, photo) -> tuple[Optional[str], str]:
-        """Encode photo to base64 for API."""
+        """Encode photo to base64 for API. Returns (data, media_type) or (None, skip_reason)."""
         try:
             # Try direct path first (fastest)
             filepath = Path(photo.path) if photo.path else None
@@ -508,12 +523,12 @@ class PhotoCleaner:
                 with tempfile.TemporaryDirectory() as tmpdir:
                     exported = photo.export(tmpdir, use_photos_export=False)
                     if not exported:
-                        return None, ""
+                        return None, "export_failed"
                     filepath = Path(exported[0])
             
             ext = filepath.suffix.lower()
             if ext in SKIP_EXTENSIONS:
-                return None, ""
+                return None, f"skip_{ext}"
             
             # Resize for faster API
             if PIL_AVAILABLE:
@@ -526,15 +541,21 @@ class PhotoCleaner:
                         img.save(buffer, format='JPEG', quality=80)
                         buffer.seek(0)
                         return base64.b64encode(buffer.read()).decode(), "image/jpeg"
-                except:
-                    pass
+                except Exception as pil_err:
+                    # HEIC without pillow-heif, or other PIL error
+                    if ext == ".heic" and not HEIC_AVAILABLE:
+                        return None, "skip_heic_no_support"
+                    return None, f"pil_error"
             
-            # Fallback: read original
-            with open(filepath, "rb") as f:
-                return base64.b64encode(f.read()).decode(), "image/jpeg"
+            # Fallback: read original (only works for jpg/png)
+            if ext in {".jpg", ".jpeg", ".png", ".gif", ".webp"}:
+                with open(filepath, "rb") as f:
+                    return base64.b64encode(f.read()).decode(), "image/jpeg"
+            
+            return None, f"skip_{ext}"
                 
         except Exception as e:
-            return None, ""
+            return None, "error"
     
     def analyze_photo(self, image_data: str, description: str) -> dict:
         """Analyze photo with OpenAI Vision API."""
@@ -640,6 +661,7 @@ class PhotoCleaner:
                 "scanned": 0,
                 "matched": 0,
                 "deleted": 0,
+                "skipped": 0,
                 "total": 0,
                 "cost": 0.0,
                 "errors": 0,
@@ -676,13 +698,17 @@ class PhotoCleaner:
             filename = photo.original_filename or f"photo_{i}"
             
             # Encode
-            img_data, media_type = self.encode_photo(photo)
+            img_data, result_type = self.encode_photo(photo)
             
             if not img_data:
                 with state_lock:
-                    state["errors"] += 1
+                    if result_type.startswith("skip_"):
+                        state["skipped"] += 1
+                    else:
+                        state["errors"] += 1
                     state["scanned"] += 1
                     state["status"] = f"Scanning ({i+1}/{total})"
+                    state["history"].append(f"   ⏭️ {filename} ({result_type})")
                 continue
             
             # Analyze
@@ -739,6 +765,8 @@ class PhotoCleaner:
         print(f"   Scanned: {state['scanned']}")
         print(f"   Matches: {state['matched']}")
         print(f"   In Album: {state['deleted']}")
+        print(f"   Skipped: {state['skipped']} (videos/RAW)")
+        print(f"   Errors: {state['errors']}")
         print(f"   Cost: ${state['cost']:.4f}")
         
         if state["deleted"] > 0:
