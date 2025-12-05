@@ -18,6 +18,7 @@ ENV_PATH = os.path.expanduser("~/Documents/Keys/.env")
 MODEL = "gpt-4o-mini"
 MAX_IMAGE_SIZE = 512
 CONFIDENCE_THRESHOLD = 0.7
+ALBUM_NAME = "🤖 AI Matches"
 
 PHOTOS_LIBRARY = os.path.expanduser("~/Pictures/Photos Library.photoslibrary")
 PHOTO_PATHS = [
@@ -74,6 +75,27 @@ def get_local_photos(limit=None):
                     return photos
     return photos
 
+def add_to_album(filename):
+    """Add a photo to the AI Matches album by filename."""
+    script = f'''
+    tell application "Photos"
+        try
+            set targetAlbum to album "{ALBUM_NAME}"
+        on error
+            set targetAlbum to make new album named "{ALBUM_NAME}"
+        end try
+        
+        set matchedPhotos to (every media item whose filename is "{filename}")
+        if (count of matchedPhotos) > 0 then
+            add matchedPhotos to targetAlbum
+        end if
+    end tell
+    '''
+    try:
+        subprocess.run(["osascript", "-e", script], capture_output=True, timeout=10)
+    except:
+        pass
+
 # ============================================================
 # PyQt6
 # ============================================================
@@ -104,33 +126,35 @@ except ImportError:
 # Themes
 # ============================================================
 DARK = {
-    "bg": "#0a0a0a",
-    "surface": "#141414",
-    "surface2": "#1c1c1c",
-    "border": "#2a2a2a",
-    "text": "#e5e5e5",
-    "text2": "#888888",
-    "text3": "#555555",
-    "accent": "#6366f1",
-    "accent2": "#4f46e5",
-    "green": "#10b981",
-    "green_bg": "rgba(16, 185, 129, 0.08)",
+    "bg": "#000000",
+    "surface": "#0a0a0a",
+    "surface2": "#111111",
+    "surface3": "#1a1a1a",
+    "border": "transparent",
+    "text": "#ffffff",
+    "text2": "#999999",
+    "text3": "#666666",
+    "accent": "#8b5cf6",
+    "accent2": "#7c3aed",
+    "green": "#22c55e",
+    "green_bg": "rgba(34, 197, 94, 0.12)",
     "orange": "#f59e0b",
     "red": "#ef4444",
 }
 
 LIGHT = {
-    "bg": "#f8f8f8",
-    "surface": "#ffffff",
-    "surface2": "#f0f0f0",
-    "border": "#e0e0e0",
-    "text": "#1a1a1a",
-    "text2": "#666666",
-    "text3": "#999999",
-    "accent": "#4f46e5",
-    "accent2": "#4338ca",
-    "green": "#059669",
-    "green_bg": "rgba(5, 150, 105, 0.08)",
+    "bg": "#ffffff",
+    "surface": "#fafafa",
+    "surface2": "#f5f5f5",
+    "surface3": "#eeeeee",
+    "border": "transparent",
+    "text": "#000000",
+    "text2": "#555555",
+    "text3": "#888888",
+    "accent": "#7c3aed",
+    "accent2": "#6d28d9",
+    "green": "#16a34a",
+    "green_bg": "rgba(22, 163, 74, 0.1)",
     "orange": "#d97706",
     "red": "#dc2626",
 }
@@ -279,95 +303,95 @@ class MainWindow(QMainWindow):
             QMainWindow {{ background: {t['bg']}; }}
             QLabel {{ color: {t['text']}; background: transparent; }}
             QLineEdit {{
-                background: {t['surface']};
-                border: 1px solid {t['border']};
-                border-radius: 8px;
-                padding: 12px 14px;
+                background: {t['surface2']};
+                border: none;
+                border-radius: 10px;
+                padding: 14px 16px;
                 color: {t['text']};
                 font-size: 14px;
             }}
-            QLineEdit:focus {{ border-color: {t['accent']}; }}
+            QLineEdit:focus {{ background: {t['surface3']}; }}
             QSpinBox {{
-                background: {t['surface']};
-                border: 1px solid {t['border']};
-                border-radius: 6px;
-                padding: 8px;
+                background: {t['surface2']};
+                border: none;
+                border-radius: 8px;
+                padding: 10px 12px;
                 color: {t['text']};
             }}
             QCheckBox {{ color: {t['text2']}; }}
             QCheckBox::indicator {{
-                width: 16px; height: 16px;
-                border-radius: 4px;
-                border: 1px solid {t['border']};
+                width: 18px; height: 18px;
+                border-radius: 5px;
+                background: {t['surface2']};
+                border: none;
             }}
             QCheckBox::indicator:checked {{
                 background: {t['accent']};
-                border-color: {t['accent']};
             }}
             QScrollArea {{ background: transparent; border: none; }}
             QScrollBar:vertical {{
-                background: transparent; width: 6px;
+                background: transparent; width: 4px;
             }}
             QScrollBar::handle:vertical {{
-                background: {t['border']}; border-radius: 3px;
+                background: {t['surface3']}; border-radius: 2px;
             }}
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
         """)
         
         # Update components
         if hasattr(self, 'header_frame'):
-            self.header_frame.setStyleSheet(f"background: {t['surface']}; border-bottom: 1px solid {t['border']};")
+            self.header_frame.setStyleSheet(f"background: {t['surface']};")
         
         if hasattr(self, 'preview_frame'):
             self.preview_frame.setStyleSheet(f"""
                 background: {t['surface']};
-                border: 1px solid {t['border']};
-                border-radius: 12px;
+                border: none;
+                border-radius: 16px;
             """)
         
         if hasattr(self, 'sidebar'):
-            self.sidebar.setStyleSheet(f"background: {t['surface']}; border-left: 1px solid {t['border']};")
+            self.sidebar.setStyleSheet(f"background: {t['surface']};")
         
         if hasattr(self, 'start_btn'):
             self.start_btn.setStyleSheet(f"""
                 QPushButton {{
                     background: {t['accent']};
                     border: none;
-                    border-radius: 8px;
-                    padding: 10px 24px;
+                    border-radius: 10px;
+                    padding: 12px 28px;
                     color: white;
                     font-weight: 600;
                     font-size: 13px;
                 }}
                 QPushButton:hover {{ background: {t['accent2']}; }}
-                QPushButton:disabled {{ background: {t['border']}; color: {t['text3']}; }}
+                QPushButton:disabled {{ background: {t['surface2']}; color: {t['text3']}; }}
             """)
         
         if hasattr(self, 'stop_btn'):
             self.stop_btn.setStyleSheet(f"""
                 QPushButton {{
-                    background: transparent;
-                    border: 1px solid {t['red']};
-                    border-radius: 8px;
-                    padding: 10px 20px;
+                    background: rgba(239, 68, 68, 0.15);
+                    border: none;
+                    border-radius: 10px;
+                    padding: 12px 24px;
                     color: {t['red']};
                     font-weight: 600;
                     font-size: 13px;
                 }}
-                QPushButton:hover {{ background: rgba(239, 68, 68, 0.1); }}
+                QPushButton:hover {{ background: rgba(239, 68, 68, 0.25); }}
             """)
         
         if hasattr(self, 'theme_btn'):
             self.theme_btn.setStyleSheet(f"""
                 QPushButton {{
                     background: {t['surface2']};
-                    border: 1px solid {t['border']};
-                    border-radius: 6px;
-                    padding: 6px 10px;
+                    border: none;
+                    border-radius: 8px;
+                    padding: 8px 12px;
                     color: {t['text']};
                     font-size: 14px;
                 }}
-                QPushButton:hover {{ background: {t['border']}; }}
+                QPushButton:hover {{ background: {t['surface3']}; }}
             """)
         
         self.refresh_matches()
@@ -491,11 +515,11 @@ class MainWindow(QMainWindow):
         
         # Progress bar
         self.progress_bar = QProgressBar()
-        self.progress_bar.setFixedHeight(3)
+        self.progress_bar.setFixedHeight(4)
         self.progress_bar.setTextVisible(False)
         self.progress_bar.setStyleSheet(f"""
-            QProgressBar {{ background: {self.t['border']}; border: none; border-radius: 1px; }}
-            QProgressBar::chunk {{ background: {self.t['accent']}; border-radius: 1px; }}
+            QProgressBar {{ background: {self.t['surface2']}; border: none; border-radius: 2px; }}
+            QProgressBar::chunk {{ background: {self.t['accent']}; border-radius: 2px; }}
         """)
         self.progress_bar.setValue(0)
         left_layout.addWidget(self.progress_bar)
@@ -600,13 +624,14 @@ class MainWindow(QMainWindow):
         open_btn.setStyleSheet(f"""
             QPushButton {{
                 background: {self.t['surface2']};
-                border: 1px solid {self.t['border']};
-                border-radius: 8px;
-                padding: 10px;
+                border: none;
+                border-radius: 10px;
+                padding: 12px;
                 color: {self.t['text']};
                 font-size: 12px;
+                font-weight: 500;
             }}
-            QPushButton:hover {{ background: {self.t['border']}; }}
+            QPushButton:hover {{ background: {self.t['surface3']}; }}
         """)
         open_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         open_btn.clicked.connect(lambda: subprocess.run(["open", "-a", "Photos"]))
@@ -621,8 +646,8 @@ class MainWindow(QMainWindow):
         frame.setStyleSheet(f"""
             QFrame {{
                 background: {self.t['surface']};
-                border: 1px solid {self.t['border']};
-                border-radius: 10px;
+                border: none;
+                border-radius: 12px;
             }}
         """)
         layout = QVBoxLayout(frame)
@@ -653,8 +678,8 @@ class MainWindow(QMainWindow):
         card.setStyleSheet(f"""
             QFrame {{
                 background: {t['green_bg']};
-                border: 1px solid {t['green']};
-                border-radius: 8px;
+                border: none;
+                border-radius: 10px;
             }}
         """)
         
@@ -777,20 +802,23 @@ class MainWindow(QMainWindow):
         
         if data.get('is_match'):
             conf = int(data.get('confidence', 0) * 100)
-            self.match_badge.setText(f"Match · {conf}%")
+            self.match_badge.setText(f"✓ Match · {conf}%")
             self.match_badge.setStyleSheet(f"""
                 background: {self.t['green_bg']};
                 color: {self.t['green']};
-                font-size: 12px;
+                font-size: 13px;
                 font-weight: 600;
-                padding: 6px 16px;
-                border-radius: 12px;
+                padding: 8px 20px;
+                border-radius: 16px;
             """)
             self.match_badge.show()
             
             self.matches.append(data)
             self.match_count.setText(str(len(self.matches)))
             self.matches_list.insertWidget(0, self.make_match_card(data))
+            
+            # Add to album in real-time
+            add_to_album(data.get('filename', ''))
         else:
             self.match_badge.hide()
     
