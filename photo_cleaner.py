@@ -1235,9 +1235,9 @@ def run_interactive():
     if not desc:
         desc = default_desc
 
-    # 4) Limit
-    lim = input("4. Limit [50 | all]: ").strip().lower()
-    limit = None if lim in ("", "all") else (int(lim) if lim.isdigit() else 50)
+    # 4) Limit (default: all)
+    lim = input("4. Limit [all]: ").strip().lower()
+    limit = None if lim in ("", "all") else (int(lim) if lim.isdigit() else None)
 
     # 5) Dashboard
     vis = input("5. Visual Dashboard? (Y/n) [Y]: ").strip().lower()
@@ -1250,8 +1250,8 @@ def run_interactive():
     # 7) Delete in real-time (default No - delete at end)
     realtime = False
     if not dry_run:
-        rt = input("7. Delete matches immediately as found? (y/N) [N]: ").strip().lower()
-        realtime = rt == "y"
+        rt = input("7. Add matches to album immediately? (Y/n) [Y]: ").strip().lower()
+        realtime = rt != "n"  # Default is Yes
 
     cleaner = PhotoCleaner(backend=backend, model=model)
 
