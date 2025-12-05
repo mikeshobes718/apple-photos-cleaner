@@ -78,14 +78,31 @@ state_lock = threading.Lock()
 # AppleScript helpers (instant, no DB load)
 # ============================================================
 def get_photo_count() -> int:
-    """Get total photo count via AppleScript."""
+    """Get total photo count via AppleScript (with retry)."""
     script = 'tell application "Photos" to return count of media items'
-    try:
-        result = subprocess.run(["osascript", "-e", script], 
-                               capture_output=True, text=True, timeout=10)
-        return int(result.stdout.strip()) if result.returncode == 0 else 0
-    except:
-        return 0
+    for attempt in range(3):
+        try:
+            result = subprocess.run(["osascript", "-e", script], 
+                                   capture_output=True, text=True, timeout=15)
+            if result.returncode == 0 and result.stdout.strip().isdigit():
+                return int(result.stdout.strip())
+            # Photos might be stuck, try restarting
+            if attempt < 2:
+                log("Photos.app not responding, restarting...")
+                subprocess.run(["killall", "Photos"], capture_output=True)
+                time.sleep(2)
+                subprocess.run(["open", "-a", "Photos"], capture_output=True)
+                time.sleep(5)
+        except subprocess.TimeoutExpired:
+            if attempt < 2:
+                log("Photos.app timed out, restarting...")
+                subprocess.run(["killall", "Photos"], capture_output=True)
+                time.sleep(2)
+                subprocess.run(["open", "-a", "Photos"], capture_output=True)
+                time.sleep(5)
+        except:
+            pass
+    return 0
 
 def get_photo_info(index: int) -> dict:
     """Get info for photo at index (1-based) via AppleScript."""
