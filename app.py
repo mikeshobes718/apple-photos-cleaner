@@ -561,8 +561,8 @@ class MainWindow(QMainWindow):
         
         # Search
         self.search = QLineEdit()
-        self.search.setPlaceholderText("What photos to find? (e.g., banking screenshots, receipts...)")
-        self.search.setText("banking, payments, and messaging screenshots")
+        self.search.setPlaceholderText("Describe what photos to find...")
+        self.search.setText("screenshots of banking apps, payment confirmations, Venmo/Zelle/CashApp transactions, credit card statements, and private text message conversations")
         left_layout.addWidget(self.search)
         
         # Controls
