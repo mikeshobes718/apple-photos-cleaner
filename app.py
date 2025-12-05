@@ -262,6 +262,7 @@ class MainWindow(QMainWindow):
         self.dark_mode = self.settings.value("dark", self.is_system_dark(), type=bool)
         self.t = DARK if self.dark_mode else LIGHT
         
+        self.setup_menu()
         self.setup_ui()
         self.apply_theme()
         
@@ -276,6 +277,56 @@ class MainWindow(QMainWindow):
         
         # Count photos on startup
         QTimer.singleShot(100, self.count_library)
+    
+    def setup_menu(self):
+        menubar = self.menuBar()
+        
+        # File menu
+        file_menu = menubar.addMenu("File")
+        
+        restart = QAction("Restart App", self)
+        restart.setShortcut("Ctrl+R")
+        restart.triggered.connect(self.restart_app)
+        file_menu.addAction(restart)
+        
+        file_menu.addSeparator()
+        
+        clear = QAction("Clear Results", self)
+        clear.setShortcut("Ctrl+Shift+C")
+        clear.triggered.connect(self.clear_results)
+        file_menu.addAction(clear)
+        
+        # View menu
+        view_menu = menubar.addMenu("View")
+        
+        toggle_theme = QAction("Toggle Dark/Light Mode", self)
+        toggle_theme.setShortcut("Ctrl+T")
+        toggle_theme.triggered.connect(self.toggle_theme)
+        view_menu.addAction(toggle_theme)
+    
+    def restart_app(self):
+        if self.scanner and self.scanner.isRunning():
+            self.scanner.stop()
+            self.scanner.wait()
+        QApplication.quit()
+        subprocess.Popen([sys.executable] + sys.argv)
+    
+    def clear_results(self):
+        self.matches = []
+        self._pixmap = None
+        self.refresh_matches()
+        self.match_count.setText("0")
+        self.update_stat(self.stat_scanned, "0")
+        self.update_stat(self.stat_matches, "0")
+        self.update_stat(self.stat_cost, "$0.00")
+        self.photo_label.clear()
+        self.photo_label.setText("◎")
+        self.name_label.setText("")
+        self.reason_label.setText("")
+        self.match_badge.hide()
+        self.status_label.setText("Ready")
+        self.progress_label.setText("")
+        self.progress_bar.setValue(0)
     
     def is_system_dark(self):
         try:
