@@ -106,6 +106,18 @@ HTML_TEMPLATE = """
       --success: #10b981;
       --warning: #f97316;
       --danger: #ef4444;
+      --photo-bg: #0f172a;
+      --log-bg: #0f172a;
+      --log-border: #1e293b;
+    }
+    [data-theme="light"] {
+      --bg: #f1f5f9;
+      --card: #ffffff;
+      --text: #1e293b;
+      --text-secondary: #64748b;
+      --photo-bg: #e2e8f0;
+      --log-bg: #f8fafc;
+      --log-border: #e2e8f0;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -114,10 +126,23 @@ HTML_TEMPLATE = """
       color: var(--text);
       min-height: 100vh;
       padding: 24px;
+      transition: background 0.3s, color 0.3s;
     }
     .container { max-width: 1200px; margin: 0 auto; }
-    h1 { font-size: 28px; margin-bottom: 8px; }
+    .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; }
+    h1 { font-size: 28px; }
     .subtitle { color: var(--text-secondary); margin-bottom: 24px; font-size: 14px; }
+    
+    .theme-toggle {
+      background: var(--card);
+      border: none;
+      padding: 8px 12px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 20px;
+      transition: transform 0.2s;
+    }
+    .theme-toggle:hover { transform: scale(1.1); }
     
     .stats {
       display: grid;
@@ -130,6 +155,7 @@ HTML_TEMPLATE = """
       padding: 16px;
       border-radius: 12px;
       text-align: center;
+      transition: background 0.3s;
     }
     .stat-label { color: var(--text-secondary); font-size: 12px; text-transform: uppercase; }
     .stat-value { font-size: 28px; font-weight: 700; margin-top: 4px; }
@@ -144,6 +170,7 @@ HTML_TEMPLATE = """
       background: var(--card);
       border-radius: 12px;
       padding: 20px;
+      transition: background 0.3s;
     }
     .card-title {
       font-size: 16px;
@@ -155,7 +182,7 @@ HTML_TEMPLATE = """
     }
     
     .photo-area {
-      background: #0f172a;
+      background: var(--photo-bg);
       border-radius: 8px;
       min-height: 300px;
       display: flex;
@@ -163,6 +190,7 @@ HTML_TEMPLATE = """
       justify-content: center;
       position: relative;
       overflow: hidden;
+      transition: background 0.3s;
     }
     .photo-area img {
       max-width: 100%;
@@ -201,11 +229,12 @@ HTML_TEMPLATE = """
       overflow-y: auto;
       font-family: monospace;
       font-size: 13px;
-      background: #0f172a;
+      background: var(--log-bg);
       border-radius: 8px;
       padding: 12px;
+      transition: background 0.3s;
     }
-    .log-entry { padding: 4px 0; border-bottom: 1px solid #1e293b; }
+    .log-entry { padding: 4px 0; border-bottom: 1px solid var(--log-border); }
     .log-match { color: var(--warning); font-weight: 600; }
     .log-added { color: var(--success); }
     
@@ -236,7 +265,10 @@ HTML_TEMPLATE = """
 </head>
 <body>
   <div class="container">
-    <h1>🧹 Apple Photos Cleaner</h1>
+    <div class="header">
+      <h1>🧹 Apple Photos Cleaner</h1>
+      <button class="theme-toggle" id="theme-toggle" onclick="toggleTheme()">🌙</button>
+    </div>
     <div class="subtitle" id="subtitle">Initializing...</div>
     
     <div class="stats">
@@ -369,6 +401,35 @@ HTML_TEMPLATE = """
     
     setInterval(fetchStats, 500);
     fetchStats();
+    
+    // Theme handling
+    function getSystemTheme() {
+      return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+    }
+    
+    function setTheme(theme) {
+      document.documentElement.setAttribute('data-theme', theme);
+      document.getElementById('theme-toggle').textContent = theme === 'light' ? '🌙' : '☀️';
+      localStorage.setItem('theme', theme);
+    }
+    
+    function toggleTheme() {
+      const current = document.documentElement.getAttribute('data-theme') || getSystemTheme();
+      setTheme(current === 'light' ? 'dark' : 'light');
+    }
+    
+    // Initialize theme from localStorage or system preference
+    (function() {
+      const saved = localStorage.getItem('theme');
+      setTheme(saved || getSystemTheme());
+      
+      // Listen for system theme changes
+      window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', (e) => {
+        if (!localStorage.getItem('theme')) {
+          setTheme(e.matches ? 'light' : 'dark');
+        }
+      });
+    })();
   </script>
 </body>
 </html>
