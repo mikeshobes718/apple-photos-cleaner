@@ -322,7 +322,10 @@ HTML_TEMPLATE = """
       <div class="card">
         <div class="card-title">
           Activity Log
-          <button class="btn" onclick="stopScan()">Stop Scan</button>
+          <div style="display:flex;gap:8px;">
+            <button class="btn" id="delete-now-btn" onclick="deleteNow()" style="display:none;background:linear-gradient(135deg,#f97316 0%,#ea580c 100%);">Delete Matches Now</button>
+            <button class="btn" onclick="stopScan()">Stop Scan</button>
+          </div>
         </div>
         <div class="log" id="log"></div>
       </div>
@@ -374,12 +377,59 @@ async function fetchStats() {
       const badge = document.getElementById('match-badge');
       badge.style.display = d.current_photo.is_match ? 'block' : 'none';
     }
+    
+    // Show "Delete Now" button if there are matches and not in dry run
+    const deleteBtn = document.getElementById('delete-now-btn');
+    const hasDryRun = (d.meta || '').includes('DRY RUN');
+    if ((d.matched || 0) > 0 && !hasDryRun && d.deleted === 0) {
+      deleteBtn.style.display = 'inline-block';
+      deleteBtn.textContent = `Delete ${d.matched} Now`;
+    } else {
+      deleteBtn.style.display = 'none';
+    }
   } catch (e) { console.error(e); }
 }
 
 async function stopScan() {
-  await fetch('/stop', { method: 'POST' });
-  document.getElementById('status').textContent = 'Stopping...';
+  const res = await fetch('/stop', { method: 'POST' });
+  const data = await res.json();
+  document.getElementById('status').textContent = 'Stopped';
+  
+  if (data.matched > 0) {
+    const action = confirm(
+      `Scan stopped. Found ${data.matched} matches so far.\n\n` +
+      `Click OK to DELETE these ${data.matched} photos now.\n` +
+      `Click Cancel to keep them.`
+    );
+    
+    if (action) {
+      await performDelete();
+    }
+  }
+}
+
+async function deleteNow() {
+  const matched = parseInt(document.getElementById('matched').textContent) || 0;
+  if (matched === 0) return;
+  
+  const action = confirm(`Delete ${matched} matched photos now?`);
+  if (action) {
+    await performDelete();
+  }
+}
+
+async function performDelete() {
+  document.getElementById('status').textContent = 'Deleting...';
+  const delRes = await fetch('/delete-matches', { method: 'POST' });
+  const delData = await delRes.json();
+  if (delData.dry_run) {
+    alert('Dry run mode - no photos were deleted.');
+  } else {
+    alert(`Deleted ${delData.deleted} photos.`);
+    document.getElementById('deleted').textContent = delData.deleted;
+  }
+  document.getElementById('status').textContent = 'Complete';
+  document.getElementById('delete-now-btn').style.display = 'none';
 }
 
 setInterval(fetchStats, 500);
@@ -904,7 +954,29 @@ def start_dashboard(cleaner: PhotoCleaner, description: str, limit: Optional[int
     def stop():
         with state_lock:
             scan_state["stop_requested"] = True
-        return jsonify({"status": "stopping"})
+            matched = scan_state["stats"]["matched"]
+            matches = scan_state["matches"].copy()
+        return jsonify({"status": "stopping", "matched": matched, "matches": matches})
+
+    @app.route('/delete-matches', methods=['POST'])
+    def delete_matches():
+        """Delete all matches found so far."""
+        with state_lock:
+            matches = scan_state["matches"].copy()
+            dry_run_mode = scan_state["meta"] and "DRY RUN" in scan_state["meta"]
+        
+        if not matches or dry_run_mode:
+            return jsonify({"deleted": 0, "dry_run": dry_run_mode})
+        
+        uuids = [m["uuid"] for m in matches]
+        deleted = cleaner.delete_photos(uuids)
+        
+        with state_lock:
+            scan_state["stats"]["deleted"] = deleted
+            scan_state["history"].append(f"🗑️ Deleted {deleted} photos after stop")
+        
+        log_line(f"DELETED after stop | count={deleted}")
+        return jsonify({"deleted": deleted})
 
     # Find free port
     port = find_free_port()
