@@ -94,6 +94,8 @@ scan_state = {
     "matches": [],  # Track matched photos for review
     "start_time": None,
     "total_photos": 0,
+    "last_progress_time": None,  # For stall detection
+    "recent_scans": [],  # [(timestamp, count), ...] for recent speed calc
 }
 state_lock = threading.Lock()
 
@@ -739,14 +741,14 @@ class PhotoCleaner:
         '''
         
         try:
-            result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=120)
+            result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=30)
             if result.returncode == 0 and result.stdout.strip().isdigit():
                 added = int(result.stdout.strip())
                 if added > 0:
                     log_line(f"ADDED TO ALBUM | count={added}")
                 return added
-            else:
-                log_line(f"ALBUM ERROR: {result.stderr}")
+        except subprocess.TimeoutExpired:
+            log_line("ALBUM TIMEOUT - Photos app may be slow")
         except Exception as e:
             log_line(f"ALBUM EXCEPTION: {e}")
         
@@ -783,6 +785,8 @@ class PhotoCleaner:
             scan_state["is_running"] = True
             scan_state["stop_requested"] = False
             scan_state["start_time"] = time.time()
+            scan_state["last_progress_time"] = time.time()
+            scan_state["recent_scans"] = []
             scan_state["stats"] = {"scanned": 0, "matched": 0, "deleted": 0, "cost": 0.0, "skipped": 0, "errors": 0}
             scan_state["history"] = []
             scan_state["matches"] = []
@@ -831,12 +835,17 @@ class PhotoCleaner:
                 elif result.get("reason", "").startswith("Error") or result.get("reason", "").startswith("API error"):
                     scan_state["stats"]["errors"] += 1
                 
-                # Calculate speed and ETA
-                elapsed = time.time() - scan_state["start_time"]
+                # Track progress for speed calculation and stall detection
+                now = time.time()
+                scan_state["last_progress_time"] = now
                 scanned = scan_state["stats"]["scanned"]
-                speed = scanned / elapsed if elapsed > 0 else 0
-                remaining = total - scanned
-                eta = remaining / speed if speed > 0 else 0
+                
+                # Add to recent scans for speed calculation
+                recent = scan_state.get("recent_scans", [])
+                recent.append((now, scanned))
+                # Keep only last 30 seconds
+                cutoff = now - 30
+                scan_state["recent_scans"] = [(t, c) for t, c in recent if t > cutoff]
                 
                 scan_state["status"] = f"Scanning ({scanned}/{total})"
             
@@ -1050,17 +1059,42 @@ def start_dashboard(cleaner: PhotoCleaner, description: str, limit: Optional[int
     def stats():
         with state_lock:
             s = scan_state["stats"]
-            elapsed = time.time() - scan_state["start_time"] if scan_state["start_time"] else 0
+            now = time.time()
+            elapsed = now - scan_state["start_time"] if scan_state["start_time"] else 0
             scanned = s["scanned"]
             total = scan_state["total_photos"]
-            speed = scanned / elapsed if elapsed > 0 else 0
+            
+            # Calculate recent speed (last 30 seconds) for better accuracy
+            recent_scans = scan_state.get("recent_scans", [])
+            # Clean old entries (keep last 30 seconds)
+            cutoff = now - 30
+            recent_scans = [(t, c) for t, c in recent_scans if t > cutoff]
+            scan_state["recent_scans"] = recent_scans
+            
+            if len(recent_scans) >= 2:
+                time_span = recent_scans[-1][0] - recent_scans[0][0]
+                count_diff = recent_scans[-1][1] - recent_scans[0][1]
+                speed = count_diff / time_span if time_span > 0 else 0
+            elif elapsed > 0:
+                speed = scanned / elapsed
+            else:
+                speed = 0
+            
+            # Detect stalls (no progress in 60 seconds)
+            last_progress = scan_state.get("last_progress_time")
+            stalled = last_progress and (now - last_progress > 60) and scan_state["is_running"]
+            
             remaining = total - scanned
-            eta = remaining / speed if speed > 0 else 0
+            eta = remaining / speed if speed > 0.01 else 0  # Avoid huge ETAs
             progress = f"{(scanned / total * 100):.0f}%" if total > 0 else "0%"
             is_deleting = scan_state.get("deleting", False)
             
+            status = scan_state["status"]
+            if stalled:
+                status = "⚠️ Stalled - may be processing large file"
+            
             return jsonify({
-                "status": scan_state["status"],
+                "status": status,
                 "scanned": s["scanned"],
                 "matched": s["matched"],
                 "deleted": s["deleted"],
@@ -1070,8 +1104,8 @@ def start_dashboard(cleaner: PhotoCleaner, description: str, limit: Optional[int
                 "history": scan_state["history"][-100:],
                 "current_photo": scan_state["current_photo"],
                 "meta": scan_state["meta"],
-                "speed": f"{speed:.1f}/s" if speed > 0 else "-",
-                "eta": format_time(eta) if eta > 0 else "-",
+                "speed": f"{speed:.1f}/s" if speed > 0.01 else "stalled" if stalled else "-",
+                "eta": format_time(eta) if eta > 0 and eta < 360000 else "calculating..." if speed < 0.01 else "-",
                 "progress": progress,
                 "deleting": is_deleting,
             })
