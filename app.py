@@ -265,6 +265,9 @@ class MainWindow(QMainWindow):
         self.setup_ui()
         self.apply_theme()
         
+        # Initial scale
+        QTimer.singleShot(50, self.scale_ui)
+        
         # Clock timer
         self.clock_timer = QTimer()
         self.clock_timer.timeout.connect(self.update_clock)
@@ -287,7 +290,7 @@ class MainWindow(QMainWindow):
     
     def update_clock(self):
         now = datetime.now()
-        self.time_label.setText(now.strftime("%H:%M"))
+        self.time_label.setText(now.strftime("%-I:%M %p"))
         self.date_label.setText(now.strftime("%a, %b %d"))
     
     def toggle_theme(self):
@@ -296,6 +299,7 @@ class MainWindow(QMainWindow):
         self.settings.setValue("dark", self.dark_mode)
         self.theme_btn.setText("☀" if self.dark_mode else "☾")
         self.apply_theme()
+        self.scale_ui()
     
     def apply_theme(self):
         t = self.t
@@ -343,10 +347,12 @@ class MainWindow(QMainWindow):
             self.header_frame.setStyleSheet(f"background: {t['surface']};")
         
         if hasattr(self, 'preview_frame'):
+            radius = int(16 * min(self.width() / 1200, self.height() / 800)) if self.width() > 0 else 16
+            radius = max(10, min(radius, 24))
             self.preview_frame.setStyleSheet(f"""
                 background: {t['surface']};
                 border: none;
-                border-radius: 16px;
+                border-radius: {radius}px;
             """)
         
         if hasattr(self, 'sidebar'):
@@ -732,8 +738,148 @@ class MainWindow(QMainWindow):
     
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        self.scale_ui()
         if self._pixmap:
             self.scale_preview()
+    
+    def scale_ui(self):
+        """Scale all UI elements based on window size."""
+        w = self.width()
+        h = self.height()
+        scale = min(w / 1200, h / 800)  # Base size 1200x800
+        scale = max(0.7, min(scale, 1.5))  # Clamp between 0.7 and 1.5
+        
+        # Font sizes
+        title_size = int(15 * scale)
+        normal_size = int(13 * scale)
+        small_size = int(11 * scale)
+        tiny_size = int(10 * scale)
+        stat_size = int(24 * scale)
+        time_size = int(14 * scale)
+        
+        # Padding/margins
+        pad = int(12 * scale)
+        radius = int(10 * scale)
+        
+        t = self.t
+        
+        # Update header elements
+        if hasattr(self, 'header_frame'):
+            for child in self.header_frame.findChildren(QLabel):
+                text = child.text()
+                if "Photo Cleaner" in text:
+                    child.setStyleSheet(f"font-size: {title_size}px; font-weight: 600;")
+                elif "photos in library" in text or "Counting" in text:
+                    child.setStyleSheet(f"color: {t['text2']}; font-size: {small_size}px;")
+                elif "API" in text or "No API" in text:
+                    child.setStyleSheet(f"color: {t['text3']}; font-size: {tiny_size}px; margin-left: 4px;")
+        
+        # Time
+        if hasattr(self, 'time_label'):
+            self.time_label.setStyleSheet(f"font-size: {time_size}px; font-weight: 600;")
+        if hasattr(self, 'date_label'):
+            self.date_label.setStyleSheet(f"font-size: {tiny_size}px; color: {t['text3']};")
+        
+        # Search input
+        if hasattr(self, 'search'):
+            self.search.setStyleSheet(f"""
+                background: {t['surface2']};
+                border: none;
+                border-radius: {radius}px;
+                padding: {pad}px {int(pad*1.2)}px;
+                color: {t['text']};
+                font-size: {normal_size}px;
+            """)
+        
+        # Buttons
+        if hasattr(self, 'start_btn'):
+            self.start_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: {t['accent']};
+                    border: none;
+                    border-radius: {radius}px;
+                    padding: {pad}px {int(pad*2)}px;
+                    color: white;
+                    font-weight: 600;
+                    font-size: {normal_size}px;
+                }}
+                QPushButton:hover {{ background: {t['accent2']}; }}
+                QPushButton:disabled {{ background: {t['surface2']}; color: {t['text3']}; }}
+            """)
+        
+        if hasattr(self, 'stop_btn'):
+            self.stop_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: rgba(239, 68, 68, 0.15);
+                    border: none;
+                    border-radius: {radius}px;
+                    padding: {pad}px {int(pad*1.8)}px;
+                    color: {t['red']};
+                    font-weight: 600;
+                    font-size: {normal_size}px;
+                }}
+                QPushButton:hover {{ background: rgba(239, 68, 68, 0.25); }}
+            """)
+        
+        if hasattr(self, 'theme_btn'):
+            self.theme_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: {t['surface2']};
+                    border: none;
+                    border-radius: {int(radius*0.8)}px;
+                    padding: {int(pad*0.6)}px {pad}px;
+                    color: {t['text']};
+                    font-size: {time_size}px;
+                }}
+                QPushButton:hover {{ background: {t['surface3']}; }}
+            """)
+        
+        # Status labels
+        if hasattr(self, 'status_label'):
+            self.status_label.setStyleSheet(f"color: {t['text3']}; font-size: {small_size}px;")
+        if hasattr(self, 'progress_label'):
+            self.progress_label.setStyleSheet(f"color: {t['text2']}; font-size: {small_size}px;")
+        
+        # Photo info
+        if hasattr(self, 'name_label'):
+            self.name_label.setStyleSheet(f"font-size: {normal_size}px; font-weight: 500;")
+        if hasattr(self, 'reason_label'):
+            self.reason_label.setStyleSheet(f"color: {t['text2']}; font-size: {small_size}px;")
+        
+        # Stats
+        for stat_frame in [getattr(self, 'stat_scanned', None), getattr(self, 'stat_matches', None), getattr(self, 'stat_cost', None)]:
+            if stat_frame:
+                stat_frame.setStyleSheet(f"""
+                    QFrame {{
+                        background: {t['surface']};
+                        border: none;
+                        border-radius: {radius}px;
+                    }}
+                """)
+                value_label = stat_frame.findChild(QLabel, "value")
+                if value_label:
+                    color = value_label.styleSheet().split("color:")[1].split(";")[0].strip() if "color:" in value_label.styleSheet() else t['accent']
+                    value_label.setStyleSheet(f"font-size: {stat_size}px; font-weight: 700; color: {color};")
+                for lbl in stat_frame.findChildren(QLabel):
+                    if lbl.objectName() != "value":
+                        lbl.setStyleSheet(f"font-size: {tiny_size}px; color: {t['text3']}; letter-spacing: 1px;")
+        
+        # Sidebar
+        sidebar_width = int(280 * scale)
+        sidebar_width = max(220, min(sidebar_width, 350))
+        if hasattr(self, 'sidebar'):
+            self.sidebar.setFixedWidth(sidebar_width)
+        
+        # Match count badge
+        if hasattr(self, 'match_count'):
+            self.match_count.setStyleSheet(f"""
+                background: {t['green']};
+                color: white;
+                font-size: {tiny_size}px;
+                font-weight: 600;
+                padding: {int(pad*0.2)}px {int(pad*0.7)}px;
+                border-radius: {int(radius*0.8)}px;
+            """)
     
     def scale_preview(self):
         if self._pixmap:
