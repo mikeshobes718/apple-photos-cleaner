@@ -1062,14 +1062,33 @@ def start_dashboard():
         except Exception as e:
             return "", 404
     
+    # Find available port
+    import socket
+    
+    def find_port(start_port, max_tries=10):
+        for i in range(max_tries):
+            port = start_port + i
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.bind(('127.0.0.1', port))
+                    return port
+            except OSError:
+                continue
+        return None
+    
+    actual_port = find_port(DASHBOARD_PORT)
+    if not actual_port:
+        print(f"⚠️  Could not find available port (tried {DASHBOARD_PORT}-{DASHBOARD_PORT+9})")
+        return None, None
+    
     # Run in background thread
     def run():
-        app.run(host='127.0.0.1', port=DASHBOARD_PORT, debug=False, use_reloader=False)
+        app.run(host='127.0.0.1', port=actual_port, debug=False, use_reloader=False)
     
     thread = threading.Thread(target=run, daemon=True)
     thread.start()
     
-    return thread
+    return thread, actual_port
 
 # ============================================================
 # Main Scanner
@@ -1110,11 +1129,16 @@ def scan_photos(description: str, limit: int = None, dry_run: bool = False, use_
     
     # Start dashboard if requested
     if use_dashboard:
-        start_dashboard()
-        import webbrowser
-        time.sleep(0.5)
-        webbrowser.open(f"http://127.0.0.1:{DASHBOARD_PORT}")
-        print(f"\n🌐 Dashboard: http://127.0.0.1:{DASHBOARD_PORT}")
+        result = start_dashboard()
+        if result:
+            _, actual_port = result
+            import webbrowser
+            time.sleep(0.5)
+            webbrowser.open(f"http://127.0.0.1:{actual_port}")
+            if actual_port != DASHBOARD_PORT:
+                print(f"\n🌐 Dashboard: http://127.0.0.1:{actual_port} (port {DASHBOARD_PORT} was busy)")
+            else:
+                print(f"\n🌐 Dashboard: http://127.0.0.1:{actual_port}")
     
     log(f"=" * 60)
     log(f"Starting scan: \"{description}\"")
