@@ -15,9 +15,31 @@ import argparse
 import threading
 import subprocess
 import webbrowser
+import logging
 from pathlib import Path
 from io import BytesIO
 from typing import Optional
+from datetime import datetime
+
+# Setup logging
+LOG_DIR = os.path.expanduser("~/Documents/logs")
+os.makedirs(LOG_DIR, exist_ok=True)
+LOG_FILE = os.path.join(LOG_DIR, "photo_cleaner.log")
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='[%(asctime)s] %(message)s',
+    datefmt='%Y-%m-%dT%H:%M:%S',
+    handlers=[
+        logging.FileHandler(LOG_FILE),
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger(__name__)
+
+def log(msg):
+    """Log a message to file and console."""
+    logger.info(msg)
 
 # Load API key from JSON file
 ENV_PATH = "/Users/mike/Documents/Keys/.env"
@@ -456,13 +478,13 @@ class PhotoCleaner:
         with state_lock:
             state["status"] = "Loading Photos library..."
         
-        print("📚 Loading Photos library...")
+        log("Loading Photos library...")
         start = time.time()
         self.db = osxphotos.PhotosDB()
         elapsed = time.time() - start
         
         count = len(list(self.db.photos()))
-        print(f"   Loaded {count:,} photos in {elapsed:.1f}s")
+        log(f"Loaded {count:,} photos in {elapsed:.1f}s")
         return count
     
     def get_photos(self, limit: Optional[int] = None) -> list:
@@ -585,8 +607,12 @@ class PhotoCleaner:
                                    capture_output=True, text=True, timeout=60)
             if result.returncode == 0 and result.stdout.strip().isdigit():
                 return int(result.stdout.strip())
-        except:
-            pass
+            elif result.stderr:
+                log(f"ALBUM ERROR | {result.stderr[:100]}")
+        except subprocess.TimeoutExpired:
+            log("ALBUM TIMEOUT")
+        except Exception as e:
+            log(f"ALBUM EXCEPTION | {e}")
         return 0
     
     def open_album(self):
@@ -635,6 +661,7 @@ class PhotoCleaner:
             state["status"] = f"Scanning (0/{total})"
             state["history"].append(f"📚 Found {total:,} photos to scan")
         
+        log(f"START | desc='{description}' | model={self.model} | total={total} | dry_run={dry_run}")
         print(f"\n🔍 Scanning {total:,} photos for: \"{description}\"")
         print(f"   Model: {self.model} | Dry run: {dry_run}\n")
         
@@ -681,6 +708,7 @@ class PhotoCleaner:
                     state["matches"].append({"uuid": photo.uuid, "filename": filename})
                     state["history"].append(f"⚡ MATCH: {filename} ({result.get('confidence', 0):.0%})")
                     
+                    log(f"MATCH | {filename} | conf={result.get('confidence', 0):.2f}")
                     print(f"   ⚡ MATCH: {filename} ({result.get('confidence', 0):.0%})")
                     print(f"      {result.get('reason', '')}")
                     
@@ -690,7 +718,10 @@ class PhotoCleaner:
                         if added:
                             state["deleted"] += 1
                             state["history"].append(f"   📁 Added to album")
+                            log(f"ADDED TO ALBUM | {filename}")
                             print(f"      📁 Added to album")
+                        else:
+                            log(f"ALBUM FAILED | {filename}")
                 else:
                     state["history"].append(f"   {filename}")
                 
