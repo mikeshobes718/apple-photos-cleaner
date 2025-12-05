@@ -2,6 +2,7 @@
 """
 Apple Photos Cleaner - Simple & Reliable
 Focuses on accuracy over speed. Processes one photo at a time.
+Includes optional web dashboard for visual monitoring.
 """
 
 import os
@@ -10,6 +11,7 @@ import json
 import time
 import base64
 import subprocess
+import threading
 from pathlib import Path
 from io import BytesIO
 from datetime import datetime
@@ -23,10 +25,32 @@ ALBUM_NAME = "🤖 AI Matches - To Delete"
 MODEL = "gpt-4o-mini"
 MAX_IMAGE_SIZE = 512
 CONFIDENCE_THRESHOLD = 0.7
+DASHBOARD_PORT = 5050
 
 # File types to skip (videos, RAW files)
 SKIP_EXTENSIONS = {'.mov', '.mp4', '.m4v', '.avi', '.3gp', '.mkv', '.webm',
                    '.raw', '.cr2', '.cr3', '.nef', '.arw', '.dng', '.orf', '.rw2'}
+
+# Global state for dashboard
+state = {
+    "running": False,
+    "stopping": False,
+    "description": "",
+    "current_photo": "",
+    "current_index": 0,
+    "total": 0,
+    "scanned": 0,
+    "matched": 0,
+    "added": 0,
+    "skipped": 0,
+    "errors": 0,
+    "cost": 0.0,
+    "rate": 0.0,
+    "eta_min": 0,
+    "matches": [],
+    "status": "idle",
+    "log": []
+}
 
 # ============================================================
 # Setup
@@ -202,28 +226,81 @@ Respond ONLY with valid JSON in this exact format:
     except Exception as e:
         return {"match": False, "confidence": 0, "reason": f"API error: {str(e)[:50]}"}
 
-def add_to_album(photo_uuid: str) -> bool:
-    """Add photo to the matches album using AppleScript."""
+def ensure_album_exists() -> bool:
+    """Create the album if it doesn't exist."""
     script = f'''
     tell application "Photos"
-        -- Get or create album
-        set albumName to "{ALBUM_NAME}"
-        set targetAlbum to missing value
-        
         try
-            set targetAlbum to album albumName
+            album "{ALBUM_NAME}"
         on error
-            set targetAlbum to make new album named albumName
+            make new album named "{ALBUM_NAME}"
         end try
-        
-        -- Add photo
+        return "ok"
+    end tell
+    '''
+    try:
+        subprocess.run(["osascript", "-e", script], capture_output=True, timeout=15)
+        return True
+    except:
+        return False
+
+def add_to_album(photo_uuid: str, retries: int = 2) -> bool:
+    """Add photo to the matches album using AppleScript."""
+    # Simpler script that's faster
+    script = f'''
+    tell application "Photos"
         try
             set thePhoto to media item id "{photo_uuid}"
-            add {{thePhoto}} to targetAlbum
-            return "success"
-        on error errMsg
-            return "error: " & errMsg
+            add {{thePhoto}} to album "{ALBUM_NAME}"
+            return "ok"
+        on error
+            return "fail"
         end try
+    end tell
+    '''
+    
+    for attempt in range(retries + 1):
+        try:
+            result = subprocess.run(
+                ["osascript", "-e", script],
+                capture_output=True,
+                text=True,
+                timeout=15  # Shorter timeout
+            )
+            if "ok" in result.stdout:
+                return True
+        except subprocess.TimeoutExpired:
+            if attempt < retries:
+                time.sleep(1)  # Brief pause before retry
+                continue
+            log("WARNING: AppleScript timed out adding to album")
+            return False
+        except Exception as e:
+            log(f"WARNING: AppleScript error: {e}")
+            return False
+    
+    return False
+
+def add_photos_batch(uuids: list) -> int:
+    """Add multiple photos to album in one AppleScript call."""
+    if not uuids:
+        return 0
+    
+    # Create album first
+    ensure_album_exists()
+    
+    # Build list of photo references
+    photo_refs = ", ".join([f'media item id "{u}"' for u in uuids[:50]])  # Max 50 at a time
+    
+    script = f'''
+    tell application "Photos"
+        set addedCount to 0
+        try
+            set photoList to {{{photo_refs}}}
+            add photoList to album "{ALBUM_NAME}"
+            set addedCount to (count of photoList)
+        end try
+        return addedCount
     end tell
     '''
     
@@ -232,20 +309,332 @@ def add_to_album(photo_uuid: str) -> bool:
             ["osascript", "-e", script],
             capture_output=True,
             text=True,
-            timeout=30
+            timeout=60
         )
-        return "success" in result.stdout.lower()
-    except subprocess.TimeoutExpired:
-        log("WARNING: AppleScript timed out adding to album")
-        return False
-    except Exception as e:
-        log(f"WARNING: AppleScript error: {e}")
-        return False
+        try:
+            return int(result.stdout.strip())
+        except:
+            return 0
+    except:
+        return 0
+
+# ============================================================
+# Dashboard HTML
+# ============================================================
+DASHBOARD_HTML = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🧹 Photo Cleaner</title>
+    <style>
+        :root {
+            --bg: #0d1117;
+            --card: #161b22;
+            --border: #30363d;
+            --text: #c9d1d9;
+            --accent: #58a6ff;
+            --green: #3fb950;
+            --red: #f85149;
+            --yellow: #d29922;
+        }
+        .light {
+            --bg: #f6f8fa;
+            --card: #ffffff;
+            --border: #d0d7de;
+            --text: #24292f;
+            --accent: #0969da;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            padding: 2rem;
+        }
+        .container { max-width: 900px; margin: 0 auto; }
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+        }
+        h1 { font-size: 1.8rem; }
+        .theme-toggle {
+            background: var(--card);
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+        .card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+        }
+        .status {
+            font-size: 1.2rem;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .status.running::before { content: '🔄'; animation: spin 1s linear infinite; }
+        .status.complete::before { content: '✅'; }
+        .status.idle::before { content: '⏸️'; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .progress-bar {
+            height: 8px;
+            background: var(--border);
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 1rem 0;
+        }
+        .progress-fill {
+            height: 100%;
+            background: var(--accent);
+            transition: width 0.3s;
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 1rem;
+        }
+        .stat {
+            text-align: center;
+            padding: 1rem;
+            background: var(--bg);
+            border-radius: 8px;
+        }
+        .stat-value {
+            font-size: 2rem;
+            font-weight: bold;
+            color: var(--accent);
+        }
+        .stat-label { font-size: 0.85rem; opacity: 0.7; }
+        .matches { margin-top: 1rem; }
+        .match {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            padding: 0.75rem;
+            background: var(--bg);
+            border-radius: 8px;
+            margin-bottom: 0.5rem;
+        }
+        .match-icon { font-size: 1.5rem; }
+        .match-info { flex: 1; }
+        .match-name { font-weight: 500; }
+        .match-reason { font-size: 0.85rem; opacity: 0.7; }
+        .confidence {
+            background: var(--green);
+            color: white;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.85rem;
+        }
+        .current-photo {
+            font-size: 0.95rem;
+            opacity: 0.8;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .buttons {
+            display: flex;
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+        button {
+            padding: 0.75rem 1.5rem;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1rem;
+            transition: opacity 0.2s;
+        }
+        button:hover { opacity: 0.8; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn-stop { background: var(--red); color: white; }
+        .btn-album { background: var(--green); color: white; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🧹 Photo Cleaner</h1>
+            <button class="theme-toggle" onclick="toggleTheme()">🌙 / ☀️</button>
+        </header>
+        
+        <div class="card">
+            <div class="status" id="status">Loading...</div>
+            <div class="current-photo" id="currentPhoto"></div>
+            <div class="progress-bar">
+                <div class="progress-fill" id="progress" style="width: 0%"></div>
+            </div>
+            <div class="stats">
+                <div class="stat">
+                    <div class="stat-value" id="scanned">0</div>
+                    <div class="stat-label">Scanned</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value" id="matched">0</div>
+                    <div class="stat-label">Matches</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value" id="added">0</div>
+                    <div class="stat-label">Added</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value" id="rate">0</div>
+                    <div class="stat-label">Rate/sec</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value" id="eta">-</div>
+                    <div class="stat-label">ETA (min)</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value" id="cost">$0</div>
+                    <div class="stat-label">Cost</div>
+                </div>
+            </div>
+            <div class="buttons">
+                <button class="btn-stop" id="stopBtn" onclick="stopScan()">⏹ Stop Scan</button>
+                <button class="btn-album" id="albumBtn" onclick="openAlbum()">📁 Open Album</button>
+            </div>
+        </div>
+        
+        <div class="card">
+            <h3>📋 Matches</h3>
+            <div class="matches" id="matches">
+                <div style="opacity: 0.5; padding: 1rem;">No matches yet...</div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Theme based on time
+        const hour = new Date().getHours();
+        if (hour >= 7 && hour < 19) {
+            document.body.classList.add('light');
+        }
+        
+        function toggleTheme() {
+            document.body.classList.toggle('light');
+        }
+        
+        function update() {
+            fetch('/api/status')
+                .then(r => r.json())
+                .then(data => {
+                    const status = document.getElementById('status');
+                    status.textContent = data.status;
+                    status.className = 'status ' + (data.running ? 'running' : (data.status.includes('COMPLETE') ? 'complete' : 'idle'));
+                    
+                    document.getElementById('currentPhoto').textContent = data.current_photo || '';
+                    
+                    const pct = data.total > 0 ? (data.current_index / data.total * 100) : 0;
+                    document.getElementById('progress').style.width = pct + '%';
+                    
+                    document.getElementById('scanned').textContent = data.scanned;
+                    document.getElementById('matched').textContent = data.matched;
+                    document.getElementById('added').textContent = data.added;
+                    document.getElementById('rate').textContent = data.rate.toFixed(1);
+                    document.getElementById('eta').textContent = data.eta_min > 0 ? data.eta_min : '-';
+                    document.getElementById('cost').textContent = '$' + data.cost.toFixed(4);
+                    
+                    // Matches
+                    const matchesDiv = document.getElementById('matches');
+                    if (data.matches && data.matches.length > 0) {
+                        matchesDiv.innerHTML = data.matches.map(m => `
+                            <div class="match">
+                                <div class="match-icon">📸</div>
+                                <div class="match-info">
+                                    <div class="match-name">${m.filename}</div>
+                                    <div class="match-reason">${m.reason}</div>
+                                </div>
+                                <div class="confidence">${Math.round(m.confidence * 100)}%</div>
+                            </div>
+                        `).join('');
+                    }
+                    
+                    // Buttons
+                    document.getElementById('stopBtn').disabled = !data.running;
+                    document.getElementById('albumBtn').disabled = data.matched === 0;
+                })
+                .catch(e => console.error('Update error:', e));
+        }
+        
+        function stopScan() {
+            fetch('/api/stop', { method: 'POST' });
+        }
+        
+        function openAlbum() {
+            fetch('/api/open-album', { method: 'POST' });
+        }
+        
+        // Update every 500ms
+        setInterval(update, 500);
+        update();
+    </script>
+</body>
+</html>
+"""
+
+# ============================================================
+# Dashboard Server
+# ============================================================
+def start_dashboard():
+    """Start Flask dashboard server."""
+    try:
+        from flask import Flask, jsonify
+    except ImportError:
+        print("⚠️  Flask not installed. Run: pip install flask")
+        return None
+    
+    app = Flask(__name__)
+    app.logger.setLevel("WARNING")
+    
+    import logging
+    log_flask = logging.getLogger('werkzeug')
+    log_flask.setLevel(logging.WARNING)
+    
+    @app.route('/')
+    def index():
+        return DASHBOARD_HTML
+    
+    @app.route('/api/status')
+    def api_status():
+        return jsonify(state)
+    
+    @app.route('/api/stop', methods=['POST'])
+    def api_stop():
+        state["stopping"] = True
+        return jsonify({"ok": True})
+    
+    @app.route('/api/open-album', methods=['POST'])
+    def api_open_album():
+        subprocess.run(["open", "-a", "Photos"], capture_output=True)
+        return jsonify({"ok": True})
+    
+    # Run in background thread
+    def run():
+        app.run(host='127.0.0.1', port=DASHBOARD_PORT, debug=False, use_reloader=False)
+    
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    
+    return thread
 
 # ============================================================
 # Main Scanner
 # ============================================================
-def scan_photos(description: str, limit: int = None, dry_run: bool = False):
+def scan_photos(description: str, limit: int = None, dry_run: bool = False, use_dashboard: bool = False):
     """
     Main scanning function.
     
@@ -253,9 +642,39 @@ def scan_photos(description: str, limit: int = None, dry_run: bool = False):
         description: What to look for in photos
         limit: Max photos to scan (None = all)
         dry_run: If True, don't add matches to album
+        use_dashboard: If True, launch web dashboard
     """
     import openai
     import osxphotos
+    
+    # Reset state
+    state.update({
+        "running": True,
+        "stopping": False,
+        "description": description,
+        "current_photo": "",
+        "current_index": 0,
+        "total": 0,
+        "scanned": 0,
+        "matched": 0,
+        "added": 0,
+        "skipped": 0,
+        "errors": 0,
+        "cost": 0.0,
+        "rate": 0.0,
+        "eta_min": 0,
+        "matches": [],
+        "status": "Starting...",
+        "log": []
+    })
+    
+    # Start dashboard if requested
+    if use_dashboard:
+        start_dashboard()
+        import webbrowser
+        time.sleep(0.5)
+        webbrowser.open(f"http://127.0.0.1:{DASHBOARD_PORT}")
+        print(f"\n🌐 Dashboard: http://127.0.0.1:{DASHBOARD_PORT}")
     
     log(f"=" * 60)
     log(f"Starting scan: \"{description}\"")
@@ -281,6 +700,7 @@ def scan_photos(description: str, limit: int = None, dry_run: bool = False):
     load_time = time.time() - start_time
     
     print(f"   ✓ Loaded {len(all_photos):,} photos in {load_time:.1f} seconds")
+    state["status"] = "Filtering local photos..."
     
     # Filter for locally available photos (not just in iCloud)
     print("   Checking for locally available photos...")
@@ -297,6 +717,8 @@ def scan_photos(description: str, limit: int = None, dry_run: bool = False):
         print("   Your photos are stored in iCloud.")
         print("   To scan them, open Photos app and download some photos first.")
         print("   (Select photos → File → Download Original)")
+        state["running"] = False
+        state["status"] = "No local photos found"
         return
     
     log(f"Library loaded: {len(all_photos):,} total, {len(photos):,} local in {load_time:.1f}s")
@@ -306,6 +728,8 @@ def scan_photos(description: str, limit: int = None, dry_run: bool = False):
         photos = photos[:limit]
     
     total = len(photos)
+    state["total"] = total
+    state["status"] = f"Scanning {total:,} photos..."
     print(f"\n🔍 Scanning {total:,} photos...\n")
     
     # Statistics
@@ -322,10 +746,18 @@ def scan_photos(description: str, limit: int = None, dry_run: bool = False):
     cost_per_image = 0.00015
     
     matches = []
+    scan_start = time.time()
     
     # Process each photo
     for i, photo in enumerate(photos, 1):
+        # Check for stop request
+        if state["stopping"]:
+            print("\n⏹️  Scan stopped by user")
+            break
+        
         filename = photo.original_filename or f"photo_{i}"
+        state["current_index"] = i
+        state["current_photo"] = filename
         
         # Progress indicator
         progress = f"[{i}/{total}]"
@@ -336,8 +768,10 @@ def scan_photos(description: str, limit: int = None, dry_run: bool = False):
         if error:
             if "Skipped" in error:
                 stats["skipped"] += 1
+                state["skipped"] = stats["skipped"]
             else:
                 stats["errors"] += 1
+                state["errors"] = stats["errors"]
                 log(f"ERROR: {error}")
             print(f"   {progress} ⏭️  {filename[:40]}")
             continue
@@ -346,40 +780,71 @@ def scan_photos(description: str, limit: int = None, dry_run: bool = False):
         result = analyze_photo(client, image_data, description)
         stats["scanned"] += 1
         stats["cost"] += cost_per_image
+        state["scanned"] = stats["scanned"]
+        state["cost"] = stats["cost"]
         
         is_match = result["match"] and result["confidence"] >= CONFIDENCE_THRESHOLD
         
         if is_match:
             stats["matched"] += 1
-            matches.append({
+            state["matched"] = stats["matched"]
+            match_data = {
                 "uuid": photo.uuid,
                 "filename": filename,
                 "confidence": result["confidence"],
                 "reason": result["reason"]
-            })
+            }
+            matches.append(match_data)
+            state["matches"] = matches[-20:]  # Keep last 20 for UI
             
             print(f"   {progress} ⚡ MATCH: {filename[:35]} ({result['confidence']:.0%})")
             print(f"           └─ {result['reason']}")
             log(f"MATCH: {filename} | conf={result['confidence']:.2f} | {result['reason']}")
-            
-            # Add to album (unless dry run)
-            if not dry_run:
-                if add_to_album(photo.uuid):
-                    stats["added_to_album"] += 1
-                    print(f"           └─ ✓ Added to album")
-                else:
-                    print(f"           └─ ⚠ Failed to add to album")
         else:
             print(f"   {progress} ○  {filename[:40]}")
         
+        # Update rate and ETA
+        elapsed = time.time() - scan_start
+        if elapsed > 0 and stats["scanned"] > 0:
+            rate = stats["scanned"] / elapsed
+            remaining = (total - i) / rate if rate > 0 else 0
+            state["rate"] = rate
+            state["eta_min"] = int(remaining / 60)
+        
         # Show progress every 10 photos
         if i % 10 == 0:
-            elapsed = time.time() - start_time - load_time
-            rate = stats["scanned"] / elapsed if elapsed > 0 else 0
-            remaining = (total - i) / rate if rate > 0 else 0
-            print(f"\n   📊 Progress: {i}/{total} | Rate: {rate:.1f}/sec | ETA: {remaining/60:.0f} min\n")
+            print(f"\n   📊 Progress: {i}/{total} | Rate: {state['rate']:.1f}/sec | ETA: {state['eta_min']} min\n")
+    
+    # Add matches to album at the end using batch add
+    if matches and not dry_run:
+        print(f"\n📁 Adding {len(matches)} matches to album...")
+        state["status"] = f"Adding {len(matches)} matches to album..."
+        
+        # Try batch add first (faster)
+        uuids = [m["uuid"] for m in matches]
+        added_count = add_photos_batch(uuids)
+        
+        if added_count > 0:
+            print(f"   ✓ Batch added {added_count} photos")
+            state["added"] = added_count
+        else:
+            # Fall back to one-by-one
+            print(f"   Batch failed, trying one-by-one...")
+            ensure_album_exists()
+            for m in matches:
+                if add_to_album(m["uuid"]):
+                    added_count += 1
+                    state["added"] = added_count
+                    print(f"   ✓ Added {m['filename'][:40]}")
+                else:
+                    print(f"   ⚠ Failed: {m['filename'][:40]}")
+        
+        stats["added_to_album"] = added_count
     
     # Summary
+    state["running"] = False
+    state["status"] = f"COMPLETE - {stats['matched']} matches found"
+    
     print(f"\n{'=' * 60}")
     print(f"📊 SCAN COMPLETE")
     print(f"{'=' * 60}")
@@ -437,14 +902,19 @@ def run_interactive():
         except ValueError:
             print("   Invalid number, scanning all photos")
     
+    # Dashboard
+    print(f"\n3. Visual dashboard (web UI)?")
+    use_dashboard = input("   Y/n [Y]: ").strip().lower() != "n"
+    
     # Dry run
-    print(f"\n3. Dry run (preview only, don't modify)?")
+    print(f"\n4. Dry run (preview only, don't add to album)?")
     dry_run = input("   y/N [N]: ").strip().lower() == "y"
     
     # Confirm
     print(f"\n" + "-" * 40)
     print(f"Description: {desc[:50]}...")
     print(f"Limit: {limit or 'all'}")
+    print(f"Dashboard: {'Yes' if use_dashboard else 'No'}")
     print(f"Mode: {'DRY RUN (preview)' if dry_run else 'LIVE (will add to album)'}")
     print(f"-" * 40)
     
@@ -454,7 +924,7 @@ def run_interactive():
         return
     
     # Run scan
-    scan_photos(desc, limit, dry_run)
+    scan_photos(desc, limit, dry_run, use_dashboard)
 
 # ============================================================
 # Main
@@ -481,6 +951,11 @@ def main():
         action="store_true",
         help="Preview only, don't add matches to album"
     )
+    parser.add_argument(
+        "--dashboard",
+        action="store_true",
+        help="Launch visual web dashboard"
+    )
     
     args = parser.parse_args()
     
@@ -493,7 +968,7 @@ def main():
     # Run
     if args.description:
         # Command line mode
-        scan_photos(args.description, args.limit, args.dry_run)
+        scan_photos(args.description, args.limit, args.dry_run, args.dashboard)
     else:
         # Interactive mode
         run_interactive()
