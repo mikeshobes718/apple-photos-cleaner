@@ -91,7 +91,7 @@ scan_state = {
     "is_running": False,
     "stop_requested": False,
     "status": "Idle",
-    "meta": {},
+    "meta": "",
     "matches": [],  # Track matched photos for review
     "start_time": None,
     "total_photos": 0,
@@ -215,11 +215,12 @@ HTML_TEMPLATE = """
       backdrop-filter: blur(10px);
     }
     .stat-label { color: var(--text-secondary); font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
-    .stat-value { font-size: 32px; font-weight: 700; margin-top: 4px; }
+    .stat-value { font-size: 28px; font-weight: 700; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .stat-value.matched { color: #f97316; }
     .stat-value.deleted { color: #ef4444; }
-    .stat-value.cost { color: #10b981; }
-    .stat-value.speed { color: #3b82f6; }
+    .stat-value.cost { color: #10b981; font-size: 22px; }
+    .stat-value.speed { color: #3b82f6; font-size: 22px; }
+    .stat-value.eta { font-size: 18px; }
     .main-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
     @media (max-width: 900px) { .main-grid { grid-template-columns: 1fr; } }
     .card { 
@@ -305,7 +306,7 @@ HTML_TEMPLATE = """
       </div>
       <div class="stat-card">
         <div class="stat-label">ETA</div>
-        <div class="stat-value" id="eta">-</div>
+        <div class="stat-value eta" id="eta">-</div>
       </div>
     </div>
 
@@ -347,7 +348,9 @@ async function fetchStats() {
     document.getElementById('matched').textContent = d.matched ?? 0;
     document.getElementById('deleted').textContent = d.deleted ?? 0;
     document.getElementById('cost').textContent = `$${(d.cost || 0).toFixed(4)}`;
-    document.getElementById('meta').textContent = d.meta || '';
+    // Handle meta - could be string or object during loading
+    const meta = typeof d.meta === 'string' ? d.meta : (d.status || 'Initializing...');
+    document.getElementById('meta').textContent = meta;
     document.getElementById('speed').textContent = d.speed || '-';
     document.getElementById('eta').textContent = d.eta || '-';
     document.getElementById('progress').textContent = d.progress || '0%';
@@ -362,9 +365,11 @@ async function fetchStats() {
     }).join('');
     logEl.scrollTop = logEl.scrollHeight;
 
+    const placeholder = document.getElementById('photo-placeholder');
+    const img = document.getElementById('photo-img');
+    
     if (d.current_photo && d.current_photo.data) {
-      document.getElementById('photo-placeholder').style.display = 'none';
-      const img = document.getElementById('photo-img');
+      placeholder.style.display = 'none';
       img.src = `data:image/jpeg;base64,${d.current_photo.data}`;
       img.style.display = 'block';
       document.getElementById('photo-name').textContent = d.current_photo.name || '';
@@ -379,6 +384,14 @@ async function fetchStats() {
       
       const badge = document.getElementById('match-badge');
       badge.style.display = d.current_photo.is_match ? 'block' : 'none';
+    } else if (d.status && d.status.includes('Loading')) {
+      placeholder.textContent = 'Loading Photos library... (1-5 min for large libraries)';
+      placeholder.style.display = 'block';
+      img.style.display = 'none';
+    } else if (d.scanned === 0) {
+      placeholder.textContent = 'Waiting for scan to start...';
+      placeholder.style.display = 'block';
+      img.style.display = 'none';
     }
     
     // Show "Delete Now" button if there are matches and not in dry run or deleting
