@@ -1,0 +1,8 @@
+# Apple Photos Cleaner - Dependencies
+osxphotos>=0.68.0
+openai>=1.0.0
+requests>=2.28.0
+flask>=3.0.0
+python-dotenv>=1.0.0
+pillow>=10.0.0  # For fast image resizing (optional but recommended)
+
