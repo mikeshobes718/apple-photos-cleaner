@@ -25,11 +25,16 @@ MODEL = "gpt-4o-mini"
 MAX_IMAGE_SIZE = 512
 CONFIDENCE_THRESHOLD = 0.7
 
-PHOTOS_DB = os.path.expanduser("~/Pictures/Photos Library.photoslibrary/database/Photos.sqlite")
-ORIGINALS_PATH = os.path.expanduser("~/Pictures/Photos Library.photoslibrary/originals")
+PHOTOS_LIBRARY = os.path.expanduser("~/Pictures/Photos Library.photoslibrary")
 
-SKIP_EXTENSIONS = {'.mov', '.mp4', '.m4v', '.avi', '.3gp', '.mkv', '.webm',
-                   '.raw', '.cr2', '.cr3', '.nef', '.arw', '.dng', '.orf', '.rw2'}
+# All possible paths where photos might be stored
+PHOTO_PATHS = [
+    os.path.join(PHOTOS_LIBRARY, "originals"),
+    os.path.join(PHOTOS_LIBRARY, "resources/renders"),
+    os.path.join(PHOTOS_LIBRARY, "resources/derivatives"),
+]
+
+VALID_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.heic', '.webp', '.gif', '.tiff'}
 
 # ============================================================
 # Load API Key
@@ -50,21 +55,31 @@ def load_api_key():
 def get_local_photos(limit=None):
     """Get photos directly from filesystem (faster than osxphotos)."""
     photos = []
+    seen_uuids = set()  # Avoid duplicates
     
-    if not os.path.exists(ORIGINALS_PATH):
-        return photos
-    
-    for root, dirs, files in os.walk(ORIGINALS_PATH):
-        for filename in files:
-            ext = os.path.splitext(filename)[1].lower()
-            if ext in SKIP_EXTENSIONS:
-                continue
-            if ext in ['.jpg', '.jpeg', '.png', '.heic', '.webp', '.gif', '.tiff']:
+    for base_path in PHOTO_PATHS:
+        if not os.path.exists(base_path):
+            continue
+            
+        for root, dirs, files in os.walk(base_path):
+            for filename in files:
+                ext = os.path.splitext(filename)[1].lower()
+                if ext not in VALID_EXTENSIONS:
+                    continue
+                
+                # Extract UUID from filename (before any suffix like _1_201_a)
+                uuid = filename.split('_')[0] if '_' in filename else os.path.splitext(filename)[0]
+                
+                # Skip if we've already seen this photo
+                if uuid in seen_uuids:
+                    continue
+                seen_uuids.add(uuid)
+                
                 filepath = os.path.join(root, filename)
                 photos.append({
                     'filename': filename,
                     'path': filepath,
-                    'uuid': os.path.splitext(filename)[0]  # UUID is filename without ext
+                    'uuid': uuid
                 })
                 
                 if limit and len(photos) >= limit:
