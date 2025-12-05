@@ -48,6 +48,7 @@ state = {
     "rate": 0.0,
     "eta_min": 0,
     "matches": [],
+    "recent_scans": [],  # Last 50 scanned items with results
     "status": "idle",
     "log": []
 }
@@ -766,6 +767,92 @@ DASHBOARD_HTML = """
             opacity: 0.5;
         }
         
+        /* Activity Feed */
+        .activity-feed {
+            max-height: 400px;
+            overflow-y: auto;
+            scrollbar-width: thin;
+            scrollbar-color: var(--card-border) transparent;
+        }
+        
+        .activity-feed::-webkit-scrollbar {
+            width: 6px;
+        }
+        
+        .activity-feed::-webkit-scrollbar-thumb {
+            background: var(--card-border);
+            border-radius: 3px;
+        }
+        
+        .activity-item {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            padding: 0.75rem;
+            border-radius: 12px;
+            margin-bottom: 0.5rem;
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--card-border);
+            transition: all 0.2s ease;
+        }
+        
+        .activity-item:hover {
+            background: var(--card-glow);
+        }
+        
+        .activity-item.is-match {
+            background: var(--success-bg);
+            border-color: rgba(52, 211, 153, 0.3);
+        }
+        
+        .activity-thumb {
+            width: 50px;
+            height: 50px;
+            border-radius: 8px;
+            object-fit: cover;
+            background: rgba(0, 0, 0, 0.3);
+            flex-shrink: 0;
+        }
+        
+        .activity-content {
+            flex: 1;
+            min-width: 0;
+        }
+        
+        .activity-filename {
+            font-weight: 500;
+            font-size: 0.85rem;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        
+        .activity-reason {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        
+        .activity-badge {
+            font-size: 0.7rem;
+            padding: 0.25rem 0.5rem;
+            border-radius: 6px;
+            font-weight: 600;
+            flex-shrink: 0;
+        }
+        
+        .activity-badge.match {
+            background: var(--success);
+            color: white;
+        }
+        
+        .activity-badge.skip {
+            background: rgba(255, 255, 255, 0.1);
+            color: var(--text-muted);
+        }
+        
         /* Description display */
         .search-query {
             display: flex;
@@ -890,6 +977,23 @@ DASHBOARD_HTML = """
                 </div>
             </div>
         </div>
+        
+        <div class="card">
+            <div class="matches-header">
+                <div class="matches-title">
+                    <span>📜</span>
+                    <span>Activity Feed</span>
+                    <span class="matches-count" id="scanCount">0</span>
+                </div>
+            </div>
+            
+            <div class="activity-feed" id="activityFeed">
+                <div class="no-matches">
+                    <div class="no-matches-icon">⏳</div>
+                    <div>Waiting for scan to start...</div>
+                </div>
+            </div>
+        </div>
     </div>
     
     <script>
@@ -967,6 +1071,29 @@ DASHBOARD_HTML = """
                                             <span class="confidence-badge ${confClass}">${conf}% match</span>
                                             <span class="match-type">AI Detected</span>
                                         </div>
+                                    </div>
+                                </div>
+                            `;
+                        }).join('');
+                    }
+                    
+                    // Activity feed
+                    document.getElementById('scanCount').textContent = data.scanned;
+                    const activityFeed = document.getElementById('activityFeed');
+                    if (data.recent_scans && data.recent_scans.length > 0) {
+                        activityFeed.innerHTML = data.recent_scans.map(s => {
+                            const conf = Math.round(s.confidence * 100);
+                            return `
+                                <div class="activity-item ${s.is_match ? 'is-match' : ''}">
+                                    <img class="activity-thumb" 
+                                         src="/api/thumb/${encodeURIComponent(s.path || '')}" 
+                                         onerror="this.style.background='linear-gradient(135deg,#1a1a2e,#16213e)'" />
+                                    <div class="activity-content">
+                                        <div class="activity-filename">${s.filename}</div>
+                                        <div class="activity-reason">${s.reason || 'No match'}</div>
+                                    </div>
+                                    <div class="activity-badge ${s.is_match ? 'match' : 'skip'}">
+                                        ${s.is_match ? conf + '% ✓' : 'Skip'}
                                     </div>
                                 </div>
                             `;
@@ -1248,6 +1375,17 @@ def scan_photos(description: str, limit: int = None, dry_run: bool = False, use_
         state["cost"] = stats["cost"]
         
         is_match = result["match"] and result["confidence"] >= CONFIDENCE_THRESHOLD
+        
+        # Add to recent scans (for activity feed)
+        scan_entry = {
+            "filename": filename,
+            "path": str(photo.path) if photo.path else "",
+            "is_match": is_match,
+            "confidence": result["confidence"],
+            "reason": result["reason"],
+            "timestamp": time.time()
+        }
+        state["recent_scans"] = [scan_entry] + state["recent_scans"][:49]  # Keep last 50
         
         if is_match:
             stats["matched"] += 1
