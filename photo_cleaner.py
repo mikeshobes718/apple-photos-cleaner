@@ -701,30 +701,60 @@ class PhotoCleaner:
             return self.analyze_ollama(image_data, description)
 
     def delete_photos(self, uuids: list[str]) -> int:
-        """Delete photos via AppleScript."""
+        """Add photos to 'AI Matches - Delete' album for manual review.
+        
+        Note: Direct deletion via AppleScript is unreliable on modern macOS.
+        This creates an album with matched photos for easy batch deletion.
+        """
         if not uuids:
             return 0
         
-        uuid_str = '", "'.join(uuids)
+        album_name = "🤖 AI Matches - To Delete"
+        uuid_list = '", "'.join(uuids)
+        
         script = f'''
         tell application "Photos"
-            set uuidList to {{"{uuid_str}"}}
-            set cnt to 0
-            repeat with u in uuidList
+            -- Create or get album
+            set albumName to "{album_name}"
+            set targetAlbum to missing value
+            
+            try
+                set targetAlbum to album albumName
+            on error
+                set targetAlbum to make new album named albumName
+            end try
+            
+            -- Add photos to album
+            set addedCount to 0
+            set uuidList to {{"{uuid_list}"}}
+            
+            repeat with photoUUID in uuidList
                 try
-                    delete (media item id u)
-                    set cnt to cnt + 1
+                    set targetPhoto to media item id photoUUID
+                    add {{targetPhoto}} to targetAlbum
+                    set addedCount to addedCount + 1
                 end try
             end repeat
-            return cnt
+            
+            return addedCount
         end tell
         '''
+        
         try:
             result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=120)
             if result.returncode == 0:
-                return int(result.stdout.strip())
-        except:
-            pass
+                count = result.stdout.strip()
+                if count.isdigit():
+                    added = int(count)
+                    if added > 0:
+                        print(f"\n   📁 Added {added} photos to album: '{album_name}'")
+                        print(f"      Open Photos app → Albums → '{album_name}' to review & delete")
+                    return added
+            else:
+                log_line(f"ALBUM ERROR: {result.stderr}")
+        except Exception as e:
+            log_line(f"ALBUM EXCEPTION: {e}")
+        
         return 0
 
     def run_parallel(
@@ -822,16 +852,16 @@ class PhotoCleaner:
                 print(f"      Reason: {result.get('reason', 'N/A')}")
                 log_line(f"MATCH | {filename} | conf={result.get('confidence', 0):.2f}")
                 
-                # Delete immediately if realtime mode
+                # Add to album immediately if realtime mode
                 if realtime_delete and not dry_run:
-                    deleted = self.delete_photos([photo.uuid])
-                    if deleted > 0:
+                    log_line(f"REALTIME ADD | {filename} | uuid={photo.uuid}")
+                    added = self.delete_photos([photo.uuid])
+                    if added > 0:
                         with state_lock:
                             scan_state["stats"]["deleted"] += 1
-                            scan_state["history"].append(f"   🗑️ Deleted: {filename}")
-                        log_line(f"REALTIME DELETE | {filename}")
-                        print(f"   🗑️ Deleted: {filename}")
-                    return None  # Already deleted, don't add to to_delete list
+                            scan_state["history"].append(f"   📁 Added to album: {filename}")
+                        log_line(f"REALTIME ADD SUCCESS | {filename}")
+                    return None  # Already processed, don't add to to_delete list
                 
                 return photo.uuid
             else:
@@ -905,10 +935,15 @@ class PhotoCleaner:
         print(f"📊 Summary ({format_time(elapsed)}):")
         print(f"   Scanned:  {stats['scanned']}")
         print(f"   Matched:  {stats['matched']}")
-        print(f"   Deleted:  {stats['deleted']}")
+        print(f"   Added to album: {stats['deleted']}")
         if pending_matches > 0:
-            print(f"   Pending:  {pending_matches} (not deleted due to stop)")
+            print(f"   Pending:  {pending_matches} (not processed due to stop)")
         print(f"   Cost:     ${stats['cost']:.4f}")
+        
+        if stats['deleted'] > 0:
+            print(f"\n   📁 Review matches in Photos app:")
+            print(f"      Albums → '🤖 AI Matches - To Delete'")
+            print(f"      Select all (⌘A) → Delete (⌫)")
         print(f"{'='*50}\n")
         
         log_line(f"END | scanned={stats['scanned']} | matched={stats['matched']} | deleted={stats['deleted']} | stopped={was_stopped} | time={elapsed:.1f}s")
