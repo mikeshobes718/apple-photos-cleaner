@@ -95,3 +95,8 @@ venv.bak/
 
 # Optional local config
 local.py
+
+# PyInstaller
+build/
+dist/
+*.spec
