@@ -748,11 +748,22 @@ class PhotoCleaner:
         
         def process_photo(idx_photo):
             idx, photo = idx_photo
+            
+            # Check stop flag at start
             if scan_state["stop_requested"]:
                 return None
             
             filename = photo.original_filename or "Unknown"
+            
+            # Check again before expensive API call
+            if scan_state["stop_requested"]:
+                return None
+                
             result = self.analyze_photo(photo, description)
+            
+            # Check after API call
+            if scan_state["stop_requested"]:
+                return None
             
             with state_lock:
                 scan_state["stats"]["scanned"] += 1
@@ -799,42 +810,78 @@ class PhotoCleaner:
             
             return None
 
-        # Process in parallel
-        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-            futures = {executor.submit(process_photo, (i, p)): i for i, p in enumerate(photos)}
+        # Process in parallel with batching for responsive stop
+        batch_size = MAX_WORKERS * 2  # Process in small batches
+        
+        for batch_start in range(0, len(photos), batch_size):
+            if scan_state["stop_requested"]:
+                with state_lock:
+                    scan_state["history"].append("⏹️ Scan stopped by user")
+                break
             
-            for future in as_completed(futures):
-                if scan_state["stop_requested"]:
-                    executor.shutdown(wait=False, cancel_futures=True)
-                    break
+            batch = photos[batch_start:batch_start + batch_size]
+            
+            with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+                futures = {executor.submit(process_photo, (batch_start + i, p)): i for i, p in enumerate(batch)}
                 
-                result = future.result()
-                if result:
-                    to_delete.append(result)
+                for future in as_completed(futures):
+                    if scan_state["stop_requested"]:
+                        # Cancel remaining futures
+                        for f in futures:
+                            f.cancel()
+                        break
+                    
+                    try:
+                        result = future.result(timeout=60)
+                        if result:
+                            to_delete.append(result)
+                    except Exception as e:
+                        log_line(f"ERROR in future: {e}")
 
-        # Delete matched photos
+        # Check if stopped
+        was_stopped = scan_state["stop_requested"]
+        if was_stopped:
+            print("\n⏹️  Scan stopped by user")
+            log_line("STOPPED by user")
+        
+        # Delete matched photos (unless stopped - user will be prompted separately)
         deleted_count = 0
-        if to_delete and not dry_run and not scan_state["stop_requested"]:
+        if to_delete and not dry_run and not was_stopped:
             with state_lock:
                 scan_state["status"] = "Deleting..."
                 scan_state["history"].append(f"🗑️  Deleting {len(to_delete)} photos...")
             
+            print(f"\n🗑️  Deleting {len(to_delete)} matched photos...")
             deleted_count = self.delete_photos(to_delete)
             
             with state_lock:
                 scan_state["stats"]["deleted"] = deleted_count
                 scan_state["history"].append(f"✅ Deleted {deleted_count} photos")
             
+            print(f"   ✅ Deleted {deleted_count} photos")
             log_line(f"DELETED | count={deleted_count}")
 
         # Final stats
         with state_lock:
-            scan_state["status"] = "Complete" if not scan_state["stop_requested"] else "Stopped"
+            scan_state["status"] = "Complete" if not was_stopped else "Stopped"
             scan_state["is_running"] = False
             stats = scan_state["stats"].copy()
+            pending_matches = len(scan_state["matches"]) if was_stopped else 0
         
         elapsed = time.time() - scan_state["start_time"]
-        log_line(f"END | scanned={stats['scanned']} | matched={stats['matched']} | deleted={stats['deleted']} | time={elapsed:.1f}s")
+        
+        # Print summary
+        print(f"\n{'='*50}")
+        print(f"📊 Summary ({format_time(elapsed)}):")
+        print(f"   Scanned:  {stats['scanned']}")
+        print(f"   Matched:  {stats['matched']}")
+        print(f"   Deleted:  {stats['deleted']}")
+        if pending_matches > 0:
+            print(f"   Pending:  {pending_matches} (not deleted due to stop)")
+        print(f"   Cost:     ${stats['cost']:.4f}")
+        print(f"{'='*50}\n")
+        
+        log_line(f"END | scanned={stats['scanned']} | matched={stats['matched']} | deleted={stats['deleted']} | stopped={was_stopped} | time={elapsed:.1f}s")
         
         return stats
 
