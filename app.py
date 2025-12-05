@@ -8,6 +8,7 @@ import sys
 import json
 import base64
 import subprocess
+import time
 from io import BytesIO
 from datetime import datetime
 
@@ -126,37 +127,35 @@ except ImportError:
 # Themes
 # ============================================================
 DARK = {
-    "bg": "#000000",
-    "surface": "#0a0a0a",
-    "surface2": "#111111",
-    "surface3": "#1a1a1a",
-    "border": "transparent",
-    "text": "#ffffff",
-    "text2": "#999999",
-    "text3": "#666666",
-    "accent": "#8b5cf6",
-    "accent2": "#7c3aed",
+    "bg": "#121212",
+    "surface": "#1e1e1e",
+    "surface2": "#2a2a2a",
+    "surface3": "#363636",
+    "text": "#f5f5f5",
+    "text2": "#a0a0a0",
+    "text3": "#6a6a6a",
+    "accent": "#a78bfa",
+    "accent2": "#8b5cf6",
+    "green": "#4ade80",
+    "green_bg": "rgba(74, 222, 128, 0.15)",
+    "orange": "#fbbf24",
+    "red": "#f87171",
+}
+
+LIGHT = {
+    "bg": "#f5f5f7",
+    "surface": "#ffffff",
+    "surface2": "#f0f0f2",
+    "surface3": "#e5e5e7",
+    "text": "#1d1d1f",
+    "text2": "#6e6e73",
+    "text3": "#aeaeb2",
+    "accent": "#7c3aed",
+    "accent2": "#6d28d9",
     "green": "#22c55e",
     "green_bg": "rgba(34, 197, 94, 0.12)",
     "orange": "#f59e0b",
     "red": "#ef4444",
-}
-
-LIGHT = {
-    "bg": "#ffffff",
-    "surface": "#fafafa",
-    "surface2": "#f5f5f5",
-    "surface3": "#eeeeee",
-    "border": "transparent",
-    "text": "#000000",
-    "text2": "#555555",
-    "text3": "#888888",
-    "accent": "#7c3aed",
-    "accent2": "#6d28d9",
-    "green": "#16a34a",
-    "green_bg": "rgba(22, 163, 74, 0.1)",
-    "orange": "#d97706",
-    "red": "#dc2626",
 }
 
 
@@ -164,7 +163,7 @@ LIGHT = {
 # Scanner
 # ============================================================
 class ScannerThread(QThread):
-    progress = pyqtSignal(int, int)
+    progress = pyqtSignal(int, int, float, int)  # current, total, speed, eta_seconds
     photo_scanned = pyqtSignal(dict)
     finished_scan = pyqtSignal(dict)
     error = pyqtSignal(str)
@@ -176,6 +175,7 @@ class ScannerThread(QThread):
         self.running = True
         self.stats = {"scanned": 0, "matched": 0, "cost": 0.0}
         self.matches = []
+        self.start_time = None
     
     def stop(self):
         self.running = False
@@ -193,12 +193,19 @@ class ScannerThread(QThread):
         
         client = openai.OpenAI(api_key=api_key)
         total = len(photos)
+        self.start_time = time.time()
         
         for i, p in enumerate(photos):
             if not self.running:
                 break
             
-            self.progress.emit(i + 1, total)
+            # Calculate speed and ETA
+            elapsed = time.time() - self.start_time
+            speed = (i + 1) / elapsed if elapsed > 0 else 0
+            remaining = total - (i + 1)
+            eta = int(remaining / speed) if speed > 0 else 0
+            
+            self.progress.emit(i + 1, total, speed, eta)
             
             try:
                 with Image.open(p['path']) as img:
@@ -970,11 +977,20 @@ class MainWindow(QMainWindow):
         if self.scanner:
             self.scanner.stop()
     
-    def on_progress(self, cur, total):
+    def on_progress(self, cur, total, speed, eta):
         pct = int(cur / total * 100) if total else 0
         self.progress_bar.setMaximum(total)
         self.progress_bar.setValue(cur)
-        self.progress_label.setText(f"{cur:,} / {total:,}")
+        
+        # Format ETA
+        if eta > 3600:
+            eta_str = f"{eta // 3600}h {(eta % 3600) // 60}m"
+        elif eta > 60:
+            eta_str = f"{eta // 60}m {eta % 60}s"
+        else:
+            eta_str = f"{eta}s"
+        
+        self.progress_label.setText(f"{cur:,} / {total:,}  •  {speed:.1f}/sec  •  {eta_str} left")
     
     def on_photo(self, data):
         self.update_stat(self.stat_scanned, f"{self.scanner.stats['scanned']:,}")
