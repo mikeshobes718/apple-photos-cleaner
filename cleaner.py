@@ -1079,7 +1079,7 @@ DASHBOARD_HTML = """
                             return `
                                 <div class="match-item">
                                     <img class="match-thumb" 
-                                         src="/api/thumb/${encodeURIComponent(m.path || '')}" 
+                                         src="/api/thumb${m.path || ''}" 
                                          onerror="this.style.background='linear-gradient(135deg,#1a1a2e,#16213e)'" />
                                     <div class="match-content">
                                         <div class="match-name">${m.filename}</div>
@@ -1100,7 +1100,7 @@ DASHBOARD_HTML = """
                             return `
                                 <div class="activity-item ${s.is_match ? 'is-match' : ''}">
                                     <img class="activity-thumb" 
-                                         src="/api/thumb/${encodeURIComponent(s.path || '')}" 
+                                         src="/api/thumb${s.path || ''}" 
                                          onerror="this.style.background='linear-gradient(135deg,#1a1a2e,#16213e)'" />
                                     <div class="activity-content">
                                         <div class="activity-filename">${s.filename}</div>
@@ -1175,22 +1175,26 @@ def start_dashboard():
     @app.route('/api/thumb/<path:filepath>')
     def api_thumb(filepath):
         """Serve photo thumbnail."""
-        from flask import send_file
+        from flask import send_file, Response
         from PIL import Image
         
         try:
-            # Decode the path
+            # Decode the path - handle URL encoding
             import urllib.parse
             filepath = urllib.parse.unquote(filepath)
             
+            # Ensure path starts with /
+            if not filepath.startswith('/'):
+                filepath = '/' + filepath
+            
             if not os.path.exists(filepath):
-                return "", 404
+                print(f"Thumb 404: {filepath}")
+                return Response("Not found", status=404)
             
             # Create thumbnail
             with Image.open(filepath) as img:
-                if img.mode in ('RGBA', 'P', 'LA'):
-                    img = img.convert('RGB')
-                elif img.mode != 'RGB':
+                # Convert to RGB for JPEG output
+                if img.mode != 'RGB':
                     img = img.convert('RGB')
                 
                 img.thumbnail((200, 200), Image.Resampling.LANCZOS)
@@ -1201,7 +1205,8 @@ def start_dashboard():
                 
                 return send_file(buffer, mimetype='image/jpeg')
         except Exception as e:
-            return "", 404
+            print(f"Thumb error: {filepath} - {e}")
+            return Response(str(e), status=500)
     
     # Find available port
     import socket
