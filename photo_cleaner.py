@@ -488,26 +488,43 @@ class PhotoCleaner:
         
         self.client = openai.OpenAI()
     
-    def load_library(self) -> int:
-        """Load the Photos library (can be slow with large libraries)."""
+    def load_library(self, recent_days: Optional[int] = None) -> int:
+        """Load the Photos library."""
         with state_lock:
             state["status"] = "Loading Photos library..."
         
         log("Loading Photos library...")
+        print("📚 Loading Photos library...")
         start = time.time()
         self.db = osxphotos.PhotosDB()
         elapsed = time.time() - start
         
-        count = len(list(self.db.photos()))
-        log(f"Loaded {count:,} photos in {elapsed:.1f}s")
-        return count
+        # Get photos with optional date filter
+        if recent_days:
+            from datetime import datetime, timedelta
+            cutoff = datetime.now() - timedelta(days=recent_days)
+            photos = [p for p in self.db.photos() if p.date and p.date >= cutoff]
+            log(f"Loaded {len(photos):,} photos from last {recent_days} days in {elapsed:.1f}s")
+            print(f"   Loaded {len(photos):,} photos (last {recent_days} days) in {elapsed:.1f}s")
+        else:
+            photos = list(self.db.photos())
+            log(f"Loaded {len(photos):,} photos in {elapsed:.1f}s")
+            print(f"   Loaded {len(photos):,} photos in {elapsed:.1f}s")
+        
+        return photos
     
-    def get_photos(self, limit: Optional[int] = None) -> list:
+    def get_photos(self, limit: Optional[int] = None, recent_days: Optional[int] = None) -> list:
         """Get photos from library."""
         if not self.db:
-            self.load_library()
+            photos = self.load_library(recent_days)
+        else:
+            if recent_days:
+                from datetime import datetime, timedelta
+                cutoff = datetime.now() - timedelta(days=recent_days)
+                photos = [p for p in self.db.photos() if p.date and p.date >= cutoff]
+            else:
+                photos = list(self.db.photos())
         
-        photos = list(self.db.photos())
         if limit:
             photos = photos[:limit]
         return photos
@@ -650,7 +667,7 @@ class PhotoCleaner:
         subprocess.run(["osascript", "-e", script], capture_output=True, timeout=10)
     
     def scan(self, description: str, limit: Optional[int] = None, 
-             dry_run: bool = False, realtime: bool = True):
+             dry_run: bool = False, realtime: bool = True, recent_days: Optional[int] = None):
         """Scan photos and find matches."""
         global state
         
@@ -675,7 +692,7 @@ class PhotoCleaner:
             })
         
         # Load photos
-        photos = self.get_photos(limit)
+        photos = self.get_photos(limit, recent_days)
         total = len(photos)
         
         with state_lock:
@@ -781,7 +798,7 @@ class PhotoCleaner:
 # Flask Dashboard
 # ============================================================
 def create_app(cleaner: PhotoCleaner, description: str, limit: Optional[int], 
-               dry_run: bool, realtime: bool):
+               dry_run: bool, realtime: bool, recent_days: Optional[int] = None):
     """Create Flask app with dashboard."""
     app = Flask(__name__)
     app.config['TEMPLATES_AUTO_RELOAD'] = True
@@ -812,7 +829,7 @@ def create_app(cleaner: PhotoCleaner, description: str, limit: Optional[int],
     
     # Start scan in background
     def run_scan():
-        cleaner.scan(description, limit, dry_run, realtime)
+        cleaner.scan(description, limit, dry_run, realtime, recent_days)
     
     thread = threading.Thread(target=run_scan, daemon=True)
     thread.start()
@@ -858,20 +875,26 @@ def run_interactive():
     print(f"   Default: '{DEFAULT_DESCRIPTION}'")
     desc = input("   Description [Enter for default]: ").strip() or DEFAULT_DESCRIPTION
     
+    # Recent days (faster startup)
+    days = input("\n3. Scan photos from last N days [90]: ").strip()
+    recent_days = 90 if days == "" else (int(days) if days.isdigit() else None)
+    if days.lower() == "all":
+        recent_days = None
+    
     # Limit
-    lim = input("\n3. Limit photos [all]: ").strip().lower()
+    lim = input("\n4. Additional limit (or 'all') [all]: ").strip().lower()
     limit = None if lim in ("", "all") else (int(lim) if lim.isdigit() else None)
     
     # Dashboard
-    dashboard = input("\n4. Open visual dashboard? (Y/n) [Y]: ").strip().lower() != "n"
+    dashboard = input("\n5. Open visual dashboard? (Y/n) [Y]: ").strip().lower() != "n"
     
     # Dry run
-    dry_run = input("\n5. Dry run (preview only)? (y/N) [N]: ").strip().lower() == "y"
+    dry_run = input("\n6. Dry run (preview only)? (y/N) [N]: ").strip().lower() == "y"
     
     # Realtime
     realtime = True
     if not dry_run:
-        realtime = input("\n6. Add matches to album immediately? (Y/n) [Y]: ").strip().lower() != "n"
+        realtime = input("\n7. Add matches to album immediately? (Y/n) [Y]: ").strip().lower() != "n"
     
     # Run
     cleaner = PhotoCleaner(model=model)
@@ -881,10 +904,10 @@ def run_interactive():
         print(f"\n🚀 Dashboard: http://localhost:{port}")
         webbrowser.open(f"http://localhost:{port}")
         
-        app = create_app(cleaner, desc, limit, dry_run, realtime)
+        app = create_app(cleaner, desc, limit, dry_run, realtime, recent_days)
         app.run(host='localhost', port=port, threaded=True)
     else:
-        cleaner.scan(desc, limit, dry_run, realtime)
+        cleaner.scan(desc, limit, dry_run, realtime, recent_days)
 
 
 # ============================================================
@@ -894,6 +917,7 @@ def main():
     parser = argparse.ArgumentParser(description="AI-powered Apple Photos cleaner")
     parser.add_argument("description", nargs="?", help="Description of photos to find")
     parser.add_argument("--limit", type=int, help="Limit photos to scan")
+    parser.add_argument("--recent", type=int, default=90, help="Only scan last N days (default: 90, use 0 for all)")
     parser.add_argument("--dry-run", action="store_true", help="Preview only, don't modify")
     parser.add_argument("--model", default=DEFAULT_MODEL, help="OpenAI model")
     parser.add_argument("--dashboard", action="store_true", help="Open web dashboard")
@@ -907,6 +931,7 @@ def main():
         return
     
     # CLI mode
+    recent_days = args.recent if args.recent > 0 else None
     cleaner = PhotoCleaner(model=args.model)
     
     if args.dashboard and FLASK_AVAILABLE:
@@ -915,10 +940,10 @@ def main():
         webbrowser.open(f"http://localhost:{port}")
         
         app = create_app(cleaner, args.description, args.limit, 
-                        args.dry_run, not args.no_realtime)
+                        args.dry_run, not args.no_realtime, recent_days)
         app.run(host='localhost', port=port, threaded=True)
     else:
-        cleaner.scan(args.description, args.limit, args.dry_run, not args.no_realtime)
+        cleaner.scan(args.description, args.limit, args.dry_run, not args.no_realtime, recent_days)
 
 
 if __name__ == "__main__":
