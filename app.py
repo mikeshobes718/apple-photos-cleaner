@@ -305,7 +305,49 @@ class MainWindow(QMainWindow):
         self.scanner = None
         self.matches = []
         self.current_photo = None
+        self.setup_menu()
         self.setup_ui()
+    
+    def setup_menu(self):
+        menubar = self.menuBar()
+        
+        # App menu (shows under "Photo Cleaner Pro" on macOS)
+        app_menu = menubar.addMenu("File")
+        
+        restart_action = app_menu.addAction("Restart App")
+        restart_action.setShortcut("Ctrl+R")
+        restart_action.triggered.connect(self.restart_app)
+        
+        app_menu.addSeparator()
+        
+        reset_action = app_menu.addAction("Clear Results")
+        reset_action.setShortcut("Ctrl+Shift+R")
+        reset_action.triggered.connect(self.clear_results)
+    
+    def restart_app(self):
+        """Restart the application."""
+        if self.scanner and self.scanner.isRunning():
+            self.scanner.stop()
+            self.scanner.wait()
+        
+        # Restart using the same executable
+        QApplication.quit()
+        subprocess.Popen([sys.executable] + sys.argv)
+    
+    def clear_results(self):
+        """Clear all scan results."""
+        self.matches = []
+        self.clear_layout(self.matches_list)
+        self.matches_badge.setText("0")
+        self.stat_scanned.setValue("0")
+        self.stat_matches.setValue("0")
+        self.stat_cost.setValue("$0.00")
+        self.photo_preview.clear()
+        self.photo_preview.setText("📷")
+        self.photo_name.setText("")
+        self.photo_reason.setText("")
+        self.match_indicator.hide()
+        self.progress_label.setText("Ready")
     
     def setup_ui(self):
         self.setWindowTitle("Photo Cleaner Pro")
