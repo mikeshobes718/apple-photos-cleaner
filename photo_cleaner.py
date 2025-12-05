@@ -81,7 +81,7 @@ TOKENS_PER_IMAGE = 270
 MAX_IMAGE_SIZE = 512  # Resize images to max 512px for speed
 MAX_WORKERS = 4  # Concurrent API calls (reduced to prevent rate limiting)
 MAX_RETRIES = 2
-FUTURE_TIMEOUT = 60  # Timeout for each photo processing
+FUTURE_TIMEOUT = 45  # Timeout for each photo processing (API timeout is 30s)
 
 # Global state for dashboard
 scan_state = {
@@ -499,7 +499,7 @@ class PhotoCleaner:
     def __init__(
         self,
         backend: str = "openai",
-        model: str = "gpt-5-mini",
+        model: str = "gpt-4o-mini",
         confidence_threshold: float = 0.7,
         openai_api_key: Optional[str] = None,
     ):
@@ -567,46 +567,51 @@ class PhotoCleaner:
         return filtered
 
     def encode_image(self, photo) -> tuple[Optional[str], str]:
-        """Export, resize, and encode photo to base64."""
+        """Get photo path and encode to base64."""
         try:
-            with tempfile.TemporaryDirectory() as tmpdir:
-                exported = photo.export(tmpdir, use_photos_export=True)
-                if not exported:
-                    return None, ""
-                
-                filepath = Path(exported[0])
-                if not filepath.exists():
-                    return None, ""
+            # Try to use the photo's path directly (much faster than exporting)
+            filepath = Path(photo.path) if photo.path else None
+            
+            if not filepath or not filepath.exists():
+                # Fallback: export the photo (slower)
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    exported = photo.export(tmpdir, use_photos_export=False)  # Don't use Photos export - too slow!
+                    if not exported:
+                        return None, ""
+                    filepath = Path(exported[0])
+            
+            if not filepath.exists():
+                return None, ""
 
-                ext = filepath.suffix.lower()
-                if ext in SKIP_EXTENSIONS:
-                    return None, ""
+            ext = filepath.suffix.lower()
+            if ext in SKIP_EXTENSIONS:
+                return None, ""
 
-                # Resize image for faster API processing
-                if PIL_AVAILABLE:
-                    try:
-                        with Image.open(filepath) as img:
-                            # Convert to RGB if necessary
-                            if img.mode in ('RGBA', 'P'):
-                                img = img.convert('RGB')
-                            
-                            # Resize maintaining aspect ratio
-                            img.thumbnail((MAX_IMAGE_SIZE, MAX_IMAGE_SIZE), Image.Resampling.LANCZOS)
-                            
-                            buffer = BytesIO()
-                            img.save(buffer, format='JPEG', quality=80, optimize=True)
-                            buffer.seek(0)
-                            return base64.standard_b64encode(buffer.read()).decode("utf-8"), "image/jpeg"
-                    except Exception:
-                        pass  # Fall back to original
+            # Resize image for faster API processing
+            if PIL_AVAILABLE:
+                try:
+                    with Image.open(filepath) as img:
+                        # Convert to RGB if necessary
+                        if img.mode in ('RGBA', 'P'):
+                            img = img.convert('RGB')
+                        
+                        # Resize maintaining aspect ratio
+                        img.thumbnail((MAX_IMAGE_SIZE, MAX_IMAGE_SIZE), Image.Resampling.LANCZOS)
+                        
+                        buffer = BytesIO()
+                        img.save(buffer, format='JPEG', quality=80, optimize=True)
+                        buffer.seek(0)
+                        return base64.standard_b64encode(buffer.read()).decode("utf-8"), "image/jpeg"
+                except Exception:
+                    pass  # Fall back to original
 
-                # Fallback: read original file
-                media_type = {
-                    ".png": "image/png", ".gif": "image/gif", ".webp": "image/webp"
-                }.get(ext, "image/jpeg")
+            # Fallback: read original file
+            media_type = {
+                ".png": "image/png", ".gif": "image/gif", ".webp": "image/webp"
+            }.get(ext, "image/jpeg")
 
-                with open(filepath, "rb") as f:
-                    return base64.standard_b64encode(f.read()).decode("utf-8"), media_type
+            with open(filepath, "rb") as f:
+                return base64.standard_b64encode(f.read()).decode("utf-8"), media_type
 
         except Exception as e:
             log_line(f"ERROR encoding: {e}")
@@ -631,7 +636,7 @@ class PhotoCleaner:
                             ],
                         },
                     ],
-                    max_completion_tokens=300,
+                    max_tokens=200,
                     timeout=30,
                 )
                 
@@ -786,13 +791,18 @@ class PhotoCleaner:
             scan_state["is_running"] = True
             scan_state["stop_requested"] = False
             scan_state["start_time"] = time.time()
-            scan_state["last_progress_time"] = time.time()
+            scan_state["last_progress_time"] = None  # Will be set after library loads
             scan_state["recent_scans"] = []
             scan_state["stats"] = {"scanned": 0, "matched": 0, "deleted": 0, "cost": 0.0, "skipped": 0, "errors": 0}
             scan_state["history"] = []
             scan_state["matches"] = []
+            scan_state["status"] = "Loading Photos library... (this may take 1-2 min)"
         
         photos = self.get_photos(limit=limit)
+        
+        # Reset progress time after library loads
+        with state_lock:
+            scan_state["last_progress_time"] = time.time()
         total = len(photos)
         
         with state_lock:
@@ -1097,9 +1107,10 @@ def start_dashboard(cleaner: PhotoCleaner, description: str, limit: Optional[int
             else:
                 speed = 0
             
-            # Detect stalls (no progress in 60 seconds)
+            # Detect stalls (no progress in 90 seconds after library loaded)
             last_progress = scan_state.get("last_progress_time")
-            stalled = last_progress and (now - last_progress > 60) and scan_state["is_running"]
+            # Don't show stalled during library loading (last_progress is None)
+            stalled = last_progress and (now - last_progress > 90) and scan_state["is_running"] and scanned > 0
             
             remaining = total - scanned
             eta = remaining / speed if speed > 0.01 else 0  # Avoid huge ETAs
@@ -1227,7 +1238,7 @@ def run_interactive():
     # 2) Model
     models = [
         ("gpt-5.1", "Highest accuracy"),
-        ("gpt-5-mini", "Best balance (default)"),
+        ("gpt-4o-mini", "Fast & reliable (default)"),
         ("gpt-5-nano", "Fastest & cheapest"),
         ("gpt-4o", "Legacy multimodal"),
         ("gpt-4o-mini", "Legacy budget"),
@@ -1242,7 +1253,7 @@ def run_interactive():
     if m.isdigit() and 0 < int(m) <= len(models):
         model = models[int(m) - 1][0]
     else:
-        model = "gpt-5-mini" if backend == "openai" else "moondream"
+        model = "gpt-4o-mini" if backend == "openai" else "moondream"
 
     # 3) Description
     default_desc = "banking, payments, and messaging screenshots (Instagram, WhatsApp, iMessage)"
@@ -1300,7 +1311,7 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="Preview only")
     parser.add_argument("--realtime", action="store_true", help="Delete matches immediately as found")
     parser.add_argument("--backend", choices=["openai", "ollama"], default="openai")
-    parser.add_argument("--model", default="gpt-5-mini")
+    parser.add_argument("--model", default="gpt-4o-mini")
     parser.add_argument("--dashboard", action="store_true", help="Open web dashboard")
 
     args = parser.parse_args()
