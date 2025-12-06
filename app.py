@@ -77,8 +77,7 @@ def get_local_photos(limit=None):
     return photos
 
 def add_to_album(filename, uuid):
-    """Add a photo to the AI Matches album by UUID or filename."""
-    # Try to match by UUID (more reliable) or filename
+    """Add a photo to the AI Matches album by UUID or filename. Skips if already in album."""
     script = f'''
     tell application "Photos"
         try
@@ -87,11 +86,17 @@ def add_to_album(filename, uuid):
             set targetAlbum to make new album named "{ALBUM_NAME}"
         end try
         
+        -- Get existing photos in album to avoid duplicates
+        set existingIds to id of every media item in targetAlbum
+        
         -- Try by ID first (UUID)
         try
             set matchedPhotos to (every media item whose id contains "{uuid}")
             if (count of matchedPhotos) > 0 then
-                add matchedPhotos to targetAlbum
+                set thePhoto to item 1 of matchedPhotos
+                if (id of thePhoto) is not in existingIds then
+                    add {{thePhoto}} to targetAlbum
+                end if
                 return
             end if
         end try
@@ -100,7 +105,10 @@ def add_to_album(filename, uuid):
         try
             set matchedPhotos to (every media item whose filename contains "{uuid}")
             if (count of matchedPhotos) > 0 then
-                add matchedPhotos to targetAlbum
+                set thePhoto to item 1 of matchedPhotos
+                if (id of thePhoto) is not in existingIds then
+                    add {{thePhoto}} to targetAlbum
+                end if
             end if
         end try
     end tell
