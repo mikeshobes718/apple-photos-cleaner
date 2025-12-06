@@ -366,7 +366,19 @@ class MainWindow(QMainWindow):
         self.update_stat(self.stat_matches, "0")
         self.update_stat(self.stat_cost, "$0.00")
         self.photo_label.clear()
-        self.photo_label.setText("◎")
+        self.photo_label.setText("""
+<div style='text-align: center; padding: 40px;'>
+    <div style='font-size: 48px; margin-bottom: 20px;'>✨</div>
+    <div style='font-size: 18px; font-weight: 600; margin-bottom: 12px;'>Ready to Scan</div>
+    <div style='font-size: 13px; opacity: 0.6; max-width: 300px; margin: 0 auto;'>
+        1. Describe what photos to find<br>
+        2. Set a limit (or scan all)<br>
+        3. Click Start Scan<br><br>
+        Matches will be added to<br>
+        <b>🤖 AI Matches</b> album in Photos
+    </div>
+</div>
+        """)
         self.name_label.setText("")
         self.reason_label.setText("")
         self.match_badge.hide()
@@ -418,6 +430,34 @@ class MainWindow(QMainWindow):
                 border-radius: 8px;
                 padding: 10px 12px;
                 color: {t['text']};
+                font-size: 14px;
+                font-weight: 500;
+            }}
+            QSpinBox::up-button, QSpinBox::down-button {{
+                background: {t['surface3']};
+                border: none;
+                width: 20px;
+                border-radius: 4px;
+                margin: 2px;
+            }}
+            QSpinBox::up-button:hover, QSpinBox::down-button:hover {{
+                background: {t['accent']};
+            }}
+            QSpinBox::up-arrow {{
+                image: none;
+                border-left: 5px solid transparent;
+                border-right: 5px solid transparent;
+                border-bottom: 6px solid {t['text']};
+                width: 0;
+                height: 0;
+            }}
+            QSpinBox::down-arrow {{
+                image: none;
+                border-left: 5px solid transparent;
+                border-right: 5px solid transparent;
+                border-top: 6px solid {t['text']};
+                width: 0;
+                height: 0;
             }}
             QCheckBox {{ color: {t['text2']}; }}
             QCheckBox::indicator {{
@@ -515,14 +555,18 @@ class MainWindow(QMainWindow):
         header = QHBoxLayout(self.header_frame)
         header.setContentsMargins(20, 12, 20, 12)
         
-        # Logo/Title
+        # Logo/Title - colorful gradient text effect
         logo = QLabel("✨")
-        logo.setStyleSheet("font-size: 20px;")
+        logo.setStyleSheet("font-size: 22px;")
         header.addWidget(logo)
         
-        title = QLabel("Photo Cleaner Pro")
-        title.setStyleSheet("font-size: 15px; font-weight: 600;")
+        title = QLabel("Photo Cleaner")
+        title.setStyleSheet(f"font-size: 16px; font-weight: 700; color: {self.t['accent']};")
         header.addWidget(title)
+        
+        title2 = QLabel("Pro")
+        title2.setStyleSheet(f"font-size: 16px; font-weight: 700; color: {self.t['green']};")
+        header.addWidget(title2)
         
         # Divider
         header.addSpacing(20)
@@ -650,8 +694,21 @@ class MainWindow(QMainWindow):
         self.photo_label = QLabel()
         self.photo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.photo_label.setMinimumHeight(300)
-        self.photo_label.setStyleSheet(f"color: {self.t['text3']}; font-size: 48px;")
-        self.photo_label.setText("◎")
+        self.photo_label.setStyleSheet(f"color: {self.t['text3']}; font-size: 14px; line-height: 1.6;")
+        self.photo_label.setText("""
+<div style='text-align: center; padding: 40px;'>
+    <div style='font-size: 48px; margin-bottom: 20px;'>✨</div>
+    <div style='font-size: 18px; font-weight: 600; margin-bottom: 12px;'>Ready to Scan</div>
+    <div style='font-size: 13px; opacity: 0.6; max-width: 300px; margin: 0 auto;'>
+        1. Describe what photos to find<br>
+        2. Set a limit (or scan all)<br>
+        3. Click Start Scan<br><br>
+        Matches will be added to<br>
+        <b>🤖 AI Matches</b> album in Photos
+    </div>
+</div>
+        """)
+        self.photo_label.setTextFormat(Qt.TextFormat.RichText)
         preview_layout.addWidget(self.photo_label, 1)
         
         self.name_label = QLabel("")
@@ -879,7 +936,9 @@ class MainWindow(QMainWindow):
             for child in self.header_frame.findChildren(QLabel):
                 text = child.text()
                 if "Photo Cleaner" in text:
-                    child.setStyleSheet(f"font-size: {title_size}px; font-weight: 600;")
+                    child.setStyleSheet(f"font-size: {title_size}px; font-weight: 700; color: {t['accent']};")
+                elif text == "Pro":
+                    child.setStyleSheet(f"font-size: {title_size}px; font-weight: 700; color: {t['green']};")
                 elif "photos in library" in text or "Counting" in text:
                     child.setStyleSheet(f"color: {t['text2']}; font-size: {small_size}px;")
                 elif "API" in text or "No API" in text:
